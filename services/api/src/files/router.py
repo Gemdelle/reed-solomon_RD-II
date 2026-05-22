@@ -1,7 +1,7 @@
 import httpx
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 
-from ..config import get_settings
+from config import get_settings
 
 router = APIRouter()
 

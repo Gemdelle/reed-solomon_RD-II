@@ -3,11 +3,11 @@ import asyncio
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 
-from ..config import get_settings
-from .decoder import decode_transfer
-from .encoder import encode_file
-from .models import ReceiveRequest, SendRequest, TransferResult, TransferStatus
-from .transport import udp
+from config import get_settings
+from redundancy.decoder import decode_transfer
+from redundancy.encoder import encode_file
+from redundancy.models import ReceiveRequest, SendRequest, TransferResult, TransferStatus
+from redundancy.transport import udp
 
 router = APIRouter()
 

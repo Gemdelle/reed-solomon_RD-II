@@ -2,11 +2,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .config import get_settings
-from .files.router import router as files_router
-from .peers.router import router as peers_router
-from .redundancy.router import router as redundancy_router
-from .redundancy.transport import udp
+from config import get_settings
+from files.router import router as files_router
+from peers.router import router as peers_router
+from redundancy.router import router as redundancy_router
+from redundancy.transport import udp
 
 
 @asynccontextmanager

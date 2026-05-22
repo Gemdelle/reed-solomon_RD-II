@@ -1,8 +1,8 @@
 import os
 
 from fastapi import FastAPI, HTTPException, Response, UploadFile, File
-from .models import FileMetadata
-from .storage import FileStorage
+from models import FileMetadata
+from storage import FileStorage
 
 app = FastAPI(title="File Server")
 storage = FileStorage(os.getenv("STORAGE_PATH", "/data"))

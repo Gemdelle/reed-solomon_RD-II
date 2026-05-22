@@ -7,7 +7,8 @@ FROM python:3.12-slim
 RUN useradd -m appuser
 WORKDIR /app
 COPY --from=builder /install /usr/local
-COPY . .
+COPY src/ src/
+ENV PYTHONPATH=/app/src
 RUN chown -R appuser:appuser /app
 USER appuser
 EXPOSE 8000
