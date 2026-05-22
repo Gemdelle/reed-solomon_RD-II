@@ -1,0 +1,32 @@
+services:
+  api:
+    build: ./services/api
+    ports:
+      - "8000:8000"
+      - "9001:9001/udp"
+    env_file: .env
+    environment:
+      FILESERVER_URL: http://fileserver:9000
+    depends_on:
+      fileserver:
+        condition: service_healthy
+    restart: unless-stopped
+
+  fileserver:
+    build: ./services/fileserver
+    # No ports: internal only — never expose 9000 to the host
+    environment:
+      STORAGE_PATH: /data
+    volumes:
+      - fileserver_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # web: (frontend React — pendiente para siguiente iteración)
+
+volumes:
+  fileserver_data:

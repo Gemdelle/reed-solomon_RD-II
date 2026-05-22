@@ -1,0 +1,35 @@
+flowchart TD
+    A([📄 Archivo de entrada\nbytes crudos]) --> B
+
+    subgraph encode["Codificación — Emisor"]
+        B["Dividir en bloques de k bytes\npadding en último bloque si es necesario"]
+        B --> C["RSCodec.encode\nk bytes → n bytes\nagrega n−k símbolos de paridad"]
+        C --> D["Construir datagrama UDP\nheader: transfer_id, block_index, n, k\npayload: n bytes"]
+    end
+
+    D --> E{{"🌐 Red UDP\npérdida de paquetes posible"}}
+
+    subgraph decode["Decodificación — Receptor"]
+        F["Registrar bloques recibidos\nidentificar posiciones perdidas"]
+        G["RSCodec.decode\ncon lista de erasure_pos\nreconstruye k bytes originales"]
+        H{"¿Pérdidas\n> n−k?"}
+        I["Ensamblar archivo\neliminar padding del último bloque"]
+        J{"¿SHA-256\ncoincide?"}
+    end
+
+    E -->|bloques recibidos| F
+    F --> G
+    G --> H
+    H -->|Sí — irrecuperable| FAIL1([❌ failed\npérdida irrecuperable])
+    H -->|No| I
+    I --> J
+    J -->|No — corrupción| FAIL2([❌ failed\nSHA-256 mismatch])
+    J -->|Sí, sin erasures| OK([✅ ok\narchivo íntegro])
+    J -->|Sí, con erasures| DEG([⚠️ degraded\nRS recuperó errores\narchivo íntegro])
+
+    style encode fill:#e8f4fd,stroke:#2196F3
+    style decode fill:#e8f5e9,stroke:#4CAF50
+    style FAIL1 fill:#ffebee,stroke:#f44336
+    style FAIL2 fill:#ffebee,stroke:#f44336
+    style OK fill:#e8f5e9,stroke:#4CAF50
+    style DEG fill:#fff8e1,stroke:#FFC107

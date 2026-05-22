@@ -1,0 +1,30 @@
+graph TB
+  subgraph mA["🖥️ Máquina Usuario A — instancia local"]
+    direction TB
+    WebA["Web :3000\nReact SPA"]
+    ApiA["API :8000\nFastAPI + redundancy module"]
+    FsA["File Server :9000\ninterno — no expuesto"]
+    WebA -->|HTTP REST| ApiA
+    ApiA -->|HTTP interno| FsA
+  end
+
+  subgraph mB["🖥️ Máquina Usuario B — instancia local"]
+    direction TB
+    WebB["Web :3000\nReact SPA"]
+    ApiB["API :8000\nFastAPI + redundancy module"]
+    FsB["File Server :9000\ninterno — no expuesto"]
+    WebB -->|HTTP REST| ApiB
+    ApiB -->|HTTP interno| FsB
+  end
+
+  subgraph cloud["☁️ Cloud compartido"]
+    KC["Keycloak :8080\nAuth + Peer Registry\nNO relaya datos"]
+  end
+
+  ApiA <-->|"UDP :9001\npaquetes RS encoded\ndatos nunca pasan por cloud"| ApiB
+  ApiA <-->|HTTPS — tokens + peer lookup| KC
+  ApiB <-->|HTTPS — tokens + peer lookup| KC
+
+  style mA fill:#e8f4fd,stroke:#2196F3
+  style mB fill:#e8f5e9,stroke:#4CAF50
+  style cloud fill:#fff3e0,stroke:#FF9800
