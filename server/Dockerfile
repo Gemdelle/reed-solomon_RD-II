@@ -14,16 +14,7 @@ COPY src/ ./src/
 # parent directory. SourcelessFileLoader looks for "module.pyc" directly in the
 # module search path — it does NOT scan __pycache__ when no .py anchor is present.
 RUN python -m compileall -q -o 2 ./src/ && \
-    python -c "
-import os, re, shutil
-for root, _, files in os.walk('./src'):
-    if os.path.basename(root) == '__pycache__':
-        parent = os.path.dirname(root)
-        for f in files:
-            if f.endswith('.pyc'):
-                simple = re.sub(r'\.cpython-\d+\.opt-\d+\.pyc$', '.pyc', f)
-                shutil.move(os.path.join(root, f), os.path.join(parent, simple))
-" && \
+    python -c "import os,re,shutil; [shutil.move(os.path.join(r,f),os.path.join(os.path.dirname(r),re.sub(r'[.]cpython-[0-9]+[.]opt-[0-9]+[.]pyc','.pyc',f))) for r,_,fs in os.walk('./src') if os.path.basename(r)=='__pycache__' for f in fs if f.endswith('.pyc')]" && \
     find ./src -name "*.py" -delete && \
     find ./src -name "__pycache__" -type d -exec rm -rf {} +
 
