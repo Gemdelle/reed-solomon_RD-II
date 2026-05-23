@@ -24,6 +24,9 @@ services:
     env_file: ../.env
     environment:
       REDIS_URL: redis://redis:6379/0
+      # Internal Keycloak hostname so the server can verify JWTs via JWKS.
+      # OIDC_ISSUER stays as the public URL (must match the `iss` claim in tokens).
+      OIDC_KEYCLOAK_URL: http://keycloak:8080
     depends_on:
       - redis
     healthcheck:

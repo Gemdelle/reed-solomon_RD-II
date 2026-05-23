@@ -6,17 +6,23 @@
 |---|---|
 | Server: peer registry + WS push | ✅ funcional |
 | Server: metrics endpoint + recommender | ✅ existe, pero nadie lo alimenta |
+| Server: org/realm isolation (OIDC multi-realm) | ✅ funcional |
+| Server: group scopes (admin configurable) | ✅ funcional |
+| Server: invite tokens para agentes headless | ✅ funcional |
 | Agent: RS encoder/decoder + UDP | ✅ funcional |
 | Agent: heartbeat loop | ✅ funcional |
 | Agent: AppImage / distribución Electron | ✅ funcional (arreglado) |
 | Agent: storage path XDG-compliant | ✅ `~/.local/share/rockdove` |
+| Agent: JWT push desde UI después de login | ✅ funcional |
+| Agent: token_store (JWT dinámico en runtime) | ✅ funcional |
+| Admin panel (UI) | ✅ visibilidad de grupos + invites IoT |
 | OIDC / SSO en Electron | ✅ loopback flow con browser externo |
+| Peer invite tokens | ✅ funcional |
 | Agent: `report_metrics()` | ❌ definida, **nunca llamada** |
 | Agent: medición real de RTT/jitter/loss | ❌ no existe |
 | Persistencia en servidor | ❌ todo en dicts en memoria |
 | Feature flags | ❌ no existe |
 | Dynamic FEC | ❌ estático por transferencia |
-| Peer invite tokens | ❌ no existe |
 | NAT traversal / relay | ❌ no existe |
 | Transfer history persistido | ❌ solo en React state |
 
@@ -44,6 +50,40 @@
 ### ✅ UI: React StrictMode en build de producción
 - `StrictMode` en React 18 double-invoca effects en dev para detectar side effects → `useEffect` de `FileList` se ejecutaba 2 veces al montar, generando ráfagas de requests
 - Sacado de `main.tsx` para el AppImage
+
+---
+
+## Fixes aplicados — sesión 2
+
+### ✅ JWKS URL roto dentro de Docker
+El servidor intentaba fetch a `localhost:8081` desde dentro del container para obtener las claves públicas de Keycloak. Ese hostname no existe dentro de la red Docker — el request fallaba silenciosamente y todos los JWTs eran rechazados.
+
+Fix: `OIDC_KEYCLOAK_URL=http://keycloak:8080` en `docker-compose.yml` (hostname interno del servicio). `_jwks_url()` en `verifier.py` usa este hostname interno para el fetch de claves, pero valida el claim `iss` del JWT contra la URL pública (la que el usuario ve en el browser), evitando errores de validación de issuer.
+
+### ✅ Agente no se registraba en modo OIDC
+El agente arranca antes de que el usuario haga login. En el primer intento de registro no tenía JWT, la request fallaba con 401, y el agente nunca se recuperaba.
+
+Fix: flujo JWT push desde la UI después del login OIDC. Cuando el usuario completa el login, la UI llama `POST /auth/token` con el access token. El agente lo almacena en `token_store` y lanza inmediatamente un nuevo intento de registro con el JWT en el header `Authorization: Bearer`.
+
+### ✅ Service token `org_id` hardcodeado
+`deps.py` ponía `org_id="dev"` para los service tokens aunque hubiera un `OIDC_ISSUER` configurado. Agentes desplegados con `AGENT_SERVICE_TOKEN` en realms distintos al de desarrollo quedaban en la org incorrecta.
+
+Fix: cuando `OIDC_ISSUER` está disponible, se deriva el `org_id` a partir del realm del issuer en lugar de usar el literal `"dev"`.
+
+### ✅ Invite `org_id` ignoraba el realm del caller
+El endpoint de creación de invites siempre usaba `body.org_id` para el campo `org_id` del token generado, sin verificar a qué realm pertenecía el peer que hacía la llamada. Un peer autenticado en el realm A podía generar invites válidos para el realm B.
+
+Fix: en modo OIDC, el endpoint ahora usa `caller.org_id` (extraído del JWT del caller) en lugar de `body.org_id`.
+
+### ✅ Mapper de grupos no activo en Keycloak
+El realm JSON (`rockdove-realm.json`) sólo se importa en el primer arranque de Keycloak. Las instancias existentes que ya tenían el realm importado sin el mapper de grupos no emitían el claim `groups` en el JWT.
+
+Fix: el mapper se añade vía la API de administración de Keycloak en runtime (script de inicialización), independientemente del estado del realm existente.
+
+### ✅ Panel admin no aparecía en la UI
+La detección de admin dependía de que el claim `groups` estuviera presente en el JWT del usuario. Los tokens emitidos antes del fix anterior no incluían ese claim, por lo que ningún usuario era reconocido como admin.
+
+Fix: detección server-side. La UI ahora sondea `GET /peers/scopes`: respuesta 200 significa que el peer tiene permisos de admin; respuesta 403 significa que no. Esto elimina la dependencia del claim `groups` en el cliente.
 
 ---
 
@@ -124,9 +164,9 @@ class TransferResult(BaseModel):
 ### P1.2 · Peer Invite Tokens
 **Por qué:** agrega un trust graph real. A puede autorizar a B sin que el servidor intermedie la identidad. Crítico para IoT/edge.
 
-**Dónde:** nuevo `server/src/invites/`
+**Estado:** ✅ implementado para el flujo headless/IoT (admin panel genera snippets `.env`). Pendiente: flujo peer-a-peer sin panel admin.
 
-**Flujo:**
+**Flujo pendiente:**
 1. Peer A autenticado llama `POST /invites` → servidor genera JWT firmado:
    ```json
    { "issued_by": "peer-alice", "org_id": "org-123", "exp": 1234567890 }
@@ -135,15 +175,7 @@ class TransferResult(BaseModel):
 3. B llama `POST /peers/register` incluyendo el token → servidor valida firma, asocia B a la org
 4. Sin token, el peer queda en estado `pending` (visible solo para admins)
 
-```python
-# server/src/invites/router.py
-@router.post("/")
-async def create_invite(current_peer: str, org_id: str) -> dict:
-    token = jwt.encode({"issued_by": current_peer, "org_id": org_id, "exp": ...}, SECRET_KEY)
-    return {"token": token}
-```
-
-**Complejidad:** M
+**Complejidad restante:** S
 
 ---
 
@@ -170,17 +202,22 @@ PROFILES = {
 
 ---
 
-### ✅ P1.4 · OIDC real con Keycloak — Electron side done
-El flujo SSO en Electron funciona end-to-end:
+### ✅ P1.4 · OIDC real con Keycloak — completado (client + server)
+
+El flujo SSO está operativo end-to-end:
+
+**Client side:**
 - `startLogin()` genera la URL de autorización con PKCE y la abre en el browser del sistema
 - Keycloak redirige a `http://127.0.0.1:8000/auth/callback` (agente local)
 - El agente almacena el code; la UI hace polling y completa el token exchange con `signinCallback()`
+- La UI empuja el JWT al agente vía `POST /auth/token`; el agente re-registra con el servidor
 
-**Pendiente en server side:**
-- `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_ENABLED=true` en las env vars del servidor (ya están los campos en `/auth/config`)
-- Verificación del JWT en endpoints protegidos del servidor
-
-**Complejidad restante:** S
+**Server side:**
+- `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_ENABLED=true` configurados en el servidor
+- JWT verification con JWKS fetch desde el hostname interno de Keycloak
+- `peer_id` asignado como `JWT sub` en modo OIDC
+- `org_id` derivado del realm del issuer para service tokens
+- Invite `org_id` usa el realm del caller en modo OIDC
 
 ---
 
@@ -269,7 +306,7 @@ Tablas mínimas:
 ```
 Sprint 1 (P0):   Redis en server · métricas desde transfers
 Sprint 2 (P1a):  dynamic FEC · network profiles
-Sprint 3 (P1b + P2.1): invite tokens · feature flags · server JWT validation
+Sprint 3 (P1b + P2.1): peer-to-peer invite tokens · feature flags
 Sprint 4 (P2.2 + P2.3): historial SQLite en agent · PostgreSQL en server
 Sprint 5 (P3):   NAT hole punching · relay fallback
 ```

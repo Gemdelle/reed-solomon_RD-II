@@ -4,6 +4,12 @@
   "sslRequired": "none",
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
+  "groups": [
+    {
+      "name": "admin",
+      "path": "/admin"
+    }
+  ],
   "clients": [
     {
       "clientId": "rockdove-client",
@@ -27,7 +33,22 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
-      }
+      },
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "groups",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -43,6 +64,9 @@
           "value": "password123",
           "temporary": false
         }
+      ],
+      "groups": [
+        "/admin"
       ]
     }
   ]

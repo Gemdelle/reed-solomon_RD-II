@@ -9,9 +9,15 @@ class Settings(BaseSettings):
 
     # Keycloak / OIDC
     OIDC_ENABLED: bool = False
-    OIDC_ISSUER: str = ""         # internal URL used for token validation
-    OIDC_ISSUER_PUBLIC: str = ""  # public URL shown to the UI (set when Keycloak is behind a proxy)
+    OIDC_ISSUER: str = ""
+    OIDC_ISSUER_PUBLIC: str = ""
     OIDC_CLIENT_ID: str = ""
+    # Base URL of the Keycloak host (e.g. http://keycloak:8081).
+    # Any realm under this host is trusted for multi-org support.
+    # Derived automatically from OIDC_ISSUER when not set explicitly.
+    OIDC_KEYCLOAK_URL: str = ""
+    # Keycloak group name that grants admin privileges within an org.
+    OIDC_ADMIN_GROUP: str = "admin"
 
     # Invite tokens
     INVITE_SECRET: str = "change-me-in-production"
