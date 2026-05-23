@@ -39,8 +39,11 @@ jobs:
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
         run: |
+          tags_before=$(git tag -l 'v*' | sort)
           npx semantic-release
-          new_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
+          git fetch --tags --quiet
+          tags_after=$(git tag -l 'v*' | sort)
+          new_tag=$(comm -13 <(printf '%s\n' "$tags_before") <(printf '%s\n' "$tags_after") | head -n1)
           if [ -n "$new_tag" ]; then
             echo "new_release_published=true" >> "$GITHUB_OUTPUT"
             echo "new_release_version=${new_tag#v}" >> "$GITHUB_OUTPUT"
