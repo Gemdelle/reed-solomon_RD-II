@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, field_validator
 
 from rs.models import TransferStatus
@@ -39,6 +41,15 @@ class ReceiveRequest(BaseModel):
     k: int
     chunk_size: int
     timeout: float = 30.0
+
+
+class IncomingConnection(BaseModel):
+    transfer_id: str
+    peer_id: str
+    cert_cn: str
+    cert_fingerprint: str
+    arrived_at: str
+    status: Literal["pending", "accepted", "rejected"]
 
 
 class TransferResult(BaseModel):

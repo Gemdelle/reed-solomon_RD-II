@@ -6,6 +6,7 @@ import PeerList from "../components/PeerList";
 import TransferDialog from "../components/TransferDialog";
 import TransferHistory from "../components/TransferHistory";
 import AdminPanel from "../components/AdminPanel";
+import IncomingConnectionsBanner from "../components/IncomingConnectionsBanner";
 
 
 interface Props {
@@ -158,6 +159,9 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
 
       {/* Admin panel */}
       {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
+
+      {/* Incoming QUIC connection approvals */}
+      <IncomingConnectionsBanner />
     </div>
   );
 }

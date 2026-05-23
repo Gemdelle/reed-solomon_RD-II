@@ -12,7 +12,7 @@ from config import get_settings
 from files.router import router as files_router
 from metrics.probe import rtt_probe_loop
 from peers.router import router as peers_router
-from rs.transport import udp
+from rs.transport import QUICTransport, UDPTransport, get_transport, set_transport
 from server_client import server_client
 import storage.db as db
 import token_store
@@ -38,6 +38,7 @@ async def _heartbeat_loop() -> None:
                         api_url=settings.AGENT_API_URL,
                         udp_host=settings.UDP_HOST,
                         udp_port=settings.UDP_PORT,
+                        transport=settings.TRANSPORT_MODE,
                     )
                     token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
                 except Exception:
@@ -50,13 +51,21 @@ async def _heartbeat_loop() -> None:
 async def lifespan(app: FastAPI):
     settings = get_settings()
     await db.init_db(settings.STORAGE_PATH)
-    await udp.start(settings.UDP_HOST, settings.UDP_PORT)
+
+    # Select and start the transport based on TRANSPORT_MODE env var.
+    if settings.TRANSPORT_MODE == "quic":
+        set_transport(QUICTransport())
+    else:
+        set_transport(UDPTransport())
+    await get_transport().start(settings.UDP_HOST, settings.UDP_PORT)
+
     try:
         result = await server_client.register(
             peer_id=settings.PEER_ID,
             api_url=settings.AGENT_API_URL,
             udp_host=settings.UDP_HOST,
             udp_port=settings.UDP_PORT,
+            transport=settings.TRANSPORT_MODE,
         )
         token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
     except Exception:
@@ -66,7 +75,7 @@ async def lifespan(app: FastAPI):
     yield
     heartbeat_task.cancel()
     probe_task.cancel()
-    udp.stop()
+    get_transport().stop()
     await db.close_db()
 
 
@@ -86,7 +95,8 @@ app.include_router(transfers_router, prefix="/transfer", tags=["transfer"])
 
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
-    return {"status": "ok"}
+    settings = get_settings()
+    return {"status": "ok", "transport": settings.TRANSPORT_MODE}
 
 
 @app.get("/auth/callback", tags=["auth"])
@@ -128,6 +138,7 @@ async def push_token(body: TokenPayload):
             api_url=settings.AGENT_API_URL,
             udp_host=settings.UDP_HOST,
             udp_port=settings.UDP_PORT,
+            transport=settings.TRANSPORT_MODE,
         )
         token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
     except Exception:

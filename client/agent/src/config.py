@@ -3,6 +3,8 @@ import socket
 from functools import lru_cache
 from pathlib import Path
 
+from typing import Literal
+
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
@@ -33,6 +35,7 @@ class Settings(BaseSettings):
     NETWORK_HINT: str = "auto"
     AGENT_SERVICE_TOKEN: str = ""
     INVITE_TOKEN: str = ""
+    TRANSPORT_MODE: Literal["udp", "quic"] = "udp"
 
     model_config = {"env_file": ".env"}
 

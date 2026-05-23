@@ -10,6 +10,8 @@ dependencies = [
     "pydantic-settings==2.7.0",
     "python-multipart==0.0.20",
     "aiosqlite>=0.20",
+    "aioquic>=1.0.0",
+    "cryptography>=42.0.0",
 ]
 
 [dependency-groups]

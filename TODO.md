@@ -422,7 +422,6 @@ AGENT_SERVICE_TOKEN=rd_dW6awd00XpaS1... \
 | Feature | Descripción | Complejidad |
 |---|---|---|
 | **NAT hole punching activo** | Servidor como signaling relay: coordina intercambio de IPs + STUN para que ambos peers establezcan UDP directo detrás de NAT | L |
-| **QUIC transport** | Reemplazar raw UDP con `aioquic`. Da encryption nativa, multiplexing, congestion control. RS FEC encima de QUIC stream. | XL |
 | **Smart routing multi-hop** | Server sugiere `A → relay_C → relay_D → B` basado en graph de conectividad entre peers. Optimización de ruta por latencia + costo | XL |
 | **ML redundancy** | Reemplazar tabla de umbrales hardcodeada por modelo simple (regresión logística) entrenado sobre historial de transferencias. Input: RTT, jitter, loss histórico, network_hint | L |
 | **Peer-to-peer invite flow** | A genera un JWT de invitación fuera de banda (QR, email). B lo usa para registrarse en la org de A sin intervención del admin | S |
@@ -445,3 +444,160 @@ Sprint 6 (P3):   NAT hole punching activo · QUIC transport
 
 **El feature con mayor impacto de producto es el relay (P2.2):** desbloquea todos los escenarios
 donde el UDP directo no funciona — que es la mayoría de los entornos de internet pública.
+
+---
+
+## Sprint actual — Transport Toggle + Relay con tag efímero
+
+### Resumen
+
+Dos features en paralelo que se complementan:
+
+1. **Toggle UDP ↔ QUIC** — abstracción de capa de transporte. UDP = raw socket sin TLS (comportamiento actual). QUIC = `aioquic` sobre el mismo puerto UDP, con TLS 1.3 nativo, QUIC DATAGRAM extension (RFC 9221) para mantener la semántica unreliable que el RS FEC necesita.
+2. **Relay con tag efímero** — peers que el admin o el creador del peer puede flagear como `relay_capable`. Reciben bloques RS, los reenvían al destino real, y destruyen el buffer (nunca escriben a STORAGE_PATH). Tag efímero por sesión de relay.
+
+---
+
+### Feature A · Transport Toggle (UDP ↔ QUIC)
+
+#### Diseño del transporte
+
+```
+TRANSPORT_MODE=udp  (default)
+  └─► UDPTransport — raw asyncio.DatagramProtocol, sin TLS, puerto UDP_PORT
+
+TRANSPORT_MODE=quic
+  └─► QUICTransport — aioquic sobre el mismo UDP_PORT
+        · TLS 1.3, cert autogenerado en STORAGE_PATH al primer arranque
+        · QUIC DATAGRAM extension: bloques RS como datagrams (unreliable+encrypted)
+        · verify_peer=False en dev (sin distribución de CA)
+        · RS FEC sigue demostrando recuperación de pérdida sobre QUIC datagrams
+```
+
+Los dos transportes son **mutuamente exclusivos** en el mismo puerto. El toggle se hace via `TRANSPORT_MODE` en el `.env` (cambio requiere restart del agente, igual que UDP_PORT).
+
+El peer anuncia su `transport` en el registro al servidor. Cuando peer A envía a B, lee el `transport` de B en su `PeerInfo` y usa el cliente correspondiente. Si los modos no coinciden, la transferencia falla con error descriptivo.
+
+#### Arquitectura interna del agente
+
+`rs/transport.py` pasa de un archivo con una clase concreta a un módulo con:
+- `BaseTransport` (ABC): interfaz `start / send / collect / stop`
+- `UDPTransport`: implementación actual sin cambios de lógica, hereda de `BaseTransport`
+- `QUICTransport`: nueva implementación con `aioquic`
+- `get_transport() → BaseTransport`: singleton lazy
+- `set_transport(t: BaseTransport)`: llamado en `main.py` lifespan según `TRANSPORT_MODE`
+
+`transfers/router.py` reemplaza `from rs.transport import udp` por `from rs.transport import get_transport` y llama `get_transport().send(...)` / `get_transport().collect(...)`.
+
+#### Cert generation (QUIC)
+
+Al arrancar con `TRANSPORT_MODE=quic`, `QUICTransport.start()` llama a `_ensure_tls_certs(cert_path, key_path)`. Si los archivos ya existen, los reutiliza. Si no, los genera con `cryptography` (RSA 2048, auto-firmado, CN=rockdove-peer, validez 10 años). Los paths viven en `STORAGE_PATH/quic_cert.pem` y `STORAGE_PATH/quic_key.pem`.
+
+#### Archivos a modificar
+
+| Archivo | Cambio |
+|---|---|
+| `client/agent/pyproject.toml` | Agrega `aioquic>=1.0.0`, `cryptography>=42.0.0` |
+| `client/agent/src/config.py` | `TRANSPORT_MODE: Literal["udp","quic"] = "udp"` |
+| `client/agent/src/rs/transport.py` | Refactor completo: `BaseTransport` + `UDPTransport` + `QUICTransport` + `get/set_transport` |
+| `client/agent/src/main.py` | Selección de transporte en lifespan según `TRANSPORT_MODE` |
+| `client/agent/src/transfers/router.py` | `get_transport()` en lugar de `udp` singleton |
+| `client/agent/src/server_client.py` | Incluye `transport` en `register()` body |
+| `server/src/peers/router.py` | `PeerRegistration` + `PeerInfo` + Redis hash incluyen campo `transport` |
+| `client/ui/src/types.ts` | `PeerInfo.transport?: "udp" \| "quic"` |
+| `client/ui/src/components/PeerList.tsx` | Badge UDP/QUIC en cada peer |
+
+---
+
+### Feature B · Relay con tag efímero
+
+#### Flujo directo (sin relay)
+
+```
+A → POST {B.api_url}/transfer/receive
+A → UDP/QUIC packets → B
+A → poll B/status → ok | degraded | failed
+```
+
+#### Flujo relay (B inalcanzable)
+
+```
+1. A intenta POST {B.api_url}/transfer/receive → httpx.RequestError (timeout / conn refused)
+2. A → GET {server}/peers/relay?target=B → server devuelve Relay C (relay_capable=true)
+3. A → POST {C.api_url}/transfer/receive  body: { ..., relay_to: "B", relay_tag: "rly-a3f2" }
+4. A → UDP/QUIC packets → C  (mismos bloques RS que habría enviado a B)
+5. C colecta los bloques (collect en buffer efímero)
+6. C → POST {B.api_url}/transfer/receive  (request estándar a B)
+7. C → reenvía los mismos paquetes → B
+8. C polls B hasta que B devuelve status final
+9. C → _transfers[tid] = { status: "relayed", relay_tag: "rly-a3f2", relay_target: "B", final_status: <el de B> }
+10. C NO escribe a STORAGE_PATH — buffer destruido después del reenvío
+11. A polls C → recibe { status: "relayed", relay_tag: "rly-a3f2" }
+```
+
+#### Tag efímero
+
+El relay genera `relay_tag = f"rly-{secrets.token_hex(4)}"` al aceptar la request de relay (ej: `"rly-a3f2b1c0"`). Este tag:
+- Es único por sesión de relay
+- Viaja en `TransferResult` al sender
+- Aparece en la UI del sender como indicador de que la entrega fue vía relay
+- No se persiste en SQLite (`insert_transfer` no se llama en modo relay — es efímero)
+
+#### Capability system
+
+El admin (o el agente mismo via config) puede declarar `relay_capable=true`. Dos vías:
+
+**Vía env var (self-declared):** el agente lee `RELAY_CAPABLE=true` del `.env` y lo anuncia en el body de `POST /peers/register`.
+
+**Vía admin API (server-side override):** `POST /peers/{peer_id}/capabilities` (admin-only). Actualiza el `relay_capable` en el Redis hash del peer. Persiste hasta que el peer se re-registra (el re-register también envía su propio `relay_capable` desde config).
+
+El campo `relay_capable` se almacena en el Redis hash como string `"true"/"false"` (igual que `udp_port`).
+
+#### Nuevo endpoint en el server: GET /peers/relay
+
+```python
+GET /peers/relay?target={peer_id}
+→ PeerInfo del mejor relay disponible (relay_capable=true, misma org, distinto al target y al caller)
+→ 404 si no hay ninguno disponible
+```
+
+Selección de relay: por ahora devuelve el primero con `relay_capable=true` (FIFO). En el futuro: priorizar por métricas de latencia al target.
+
+#### Archivos a modificar
+
+| Archivo | Cambio |
+|---|---|
+| `client/agent/src/config.py` | `RELAY_CAPABLE: bool = False` |
+| `client/agent/src/rs/models.py` | Agrega `relayed = "relayed"` a `TransferStatus` |
+| `client/agent/src/transfers/models.py` | `ReceiveRequest.relay_to`, `ReceiveRequest.relay_tag`; `TransferResult.relay_tag`, `TransferResult.relay_target` |
+| `client/agent/src/transfers/router.py` | Relay fallback en `send_file()`; nueva función `_process_relay(req)`; `receive_transfer()` rutea según `relay_to` |
+| `client/agent/src/server_client.py` | `relay_capable` en `register()`; nuevo método `get_relay_for_peer(target_id)` |
+| `server/src/peers/router.py` | `relay_capable` en `PeerRegistration`, `PeerInfo`, Redis; endpoint `GET /peers/relay`; endpoint `POST /peers/{id}/capabilities` |
+| `client/ui/src/types.ts` | `PeerInfo.relay_capable?: boolean` |
+| `client/ui/src/api.ts` | `serverApi.getRelayPeer(targetId)`, `serverApi.updateCapabilities(peerId, relay_capable)` |
+| `client/ui/src/components/PeerList.tsx` | Badge relay en peers con `relay_capable=true` |
+| `client/ui/src/components/AdminPanel.tsx` | Tab "Relays": lista peers online, toggle `relay_capable` por peer |
+
+---
+
+### Estado de implementación
+
+| Sub-feature | Estado |
+|---|---|
+| `BaseTransport` + refactor `UDPTransport` | ✅ `rs/transport.py` |
+| `QUICTransport` con aioquic + cert gen | ✅ `rs/transport.py` |
+| Toggle `TRANSPORT_MODE` en config + lifespan | ✅ `config.py` + `main.py` |
+| `transport` en registro de peer (server + agent) | ✅ `server_client.py` + `peers/router.py` |
+| Badge UDP/QUIC en UI | ✅ `PeerList.tsx` |
+| CERT_HELLO protocol (98-byte datagram con peer_id + fingerprint) | ✅ `rs/transport.py` |
+| Approval gate en receiver (`wait_for_approval`) | ✅ `transfers/router.py` |
+| Endpoints `/transfer/incoming`, `/accept`, `/reject` | ✅ `transfers/router.py` |
+| `IncomingConnectionsBanner` — UI accept/reject con cert info | ✅ `ui/src/components/` |
+| Test suite QUIC coverage (73 tests passing) | ✅ `tests/test_transport.py` |
+| `RELAY_CAPABLE` en config + registro | ❌ pendiente |
+| `relay_capable` en server (Redis + endpoints) | ❌ pendiente |
+| `GET /peers/relay` en server | ❌ pendiente |
+| `POST /peers/{id}/capabilities` en server | ❌ pendiente |
+| Relay fallback en `send_file()` | ❌ pendiente |
+| `_process_relay()` con tag efímero | ❌ pendiente |
+| Badge relay + tab Relays en UI | ❌ pendiente |

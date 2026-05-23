@@ -20,8 +20,9 @@ CONTROL PLANE (one instance, cloud/VM)           DATA PLANE (one per peer machin
 ─────────────────────────────────────            ──────────────────────────────────
 server/                                          client/agent/
   ├── Peer registry                                ├── RS encoder / decoder
-  ├── Network metrics collector                    ├── UDP transport
-  └── Redundancy recommendation engine             ├── Local file storage
+  ├── Network metrics collector                    ├── UDP transport  (TRANSPORT_MODE=udp)
+  └── Redundancy recommendation engine             └── QUIC transport (TRANSPORT_MODE=quic)
+                                                   ├── Local file storage
                                                    └── Transfer orchestration
 ```
 
@@ -115,6 +116,14 @@ The client displays this as a default in the redundancy slider. The user can ove
 
 Unchanged from original design. See [REED_SOLOMON.md](./REED_SOLOMON.md).
 
+#### `rs/transport.py` — Transport Abstraction
+
+`rs/transport.py` exposes three public symbols: `BaseTransport` (abstract interface), `UDPTransport`, and `QUICTransport`. The active instance is managed via a module-level `get_transport()` / `set_transport()` pair; `main.py` selects the implementation at startup via `TRANSPORT_MODE`.
+
+`UDPTransport` — raw `asyncio.DatagramProtocol`, no TLS, port `UDP_PORT`.
+
+`QUICTransport` — aioquic over the same UDP port, TLS 1.3 via the QUIC DATAGRAM extension (RFC 9221). RS blocks are sent as unreliable QUIC datagrams so that erasure recovery still works. TLS certificates are auto-generated (RSA-2048, self-signed) with `CN = rockdove-{PEER_ID}` and stored at `STORAGE_PATH/quic_{cert,key}.pem`. The cert is regenerated automatically if `PEER_ID` changes.
+
 #### `storage/` — Local File Storage
 
 Embedded in the agent process. No separate fileserver service. Files stored to `STORAGE_PATH` with SHA-256 checksums.
@@ -164,6 +173,24 @@ POST /transfer/send
 
 ---
 
+### QUIC Transport Variant
+
+When `TRANSPORT_MODE=quic`, the sender additionally emits a **CERT_HELLO datagram** immediately before the RS blocks:
+
+```
+CERT_HELLO format (98 bytes typical):
+  RDCH magic  (4 B)
+  version     (1 B) = 0x01
+  peer_id_len (1 B)
+  peer_id     (UTF-8)
+  transfer_id (16 B, raw UUID bytes)
+  fingerprint (64 B, SHA-256 hex of sender cert)
+```
+
+The receiver surfaces this as a **pending incoming connection** visible at `GET /transfer/incoming`. The operator can approve or reject before the RS blocks are decoded. Auto-approves after 30 s if no action is taken. Rejection discards the buffer and marks the transfer `failed: rejected_by_operator`.
+
+---
+
 ## Redundancy Configuration
 
 See [REED_SOLOMON.md](./REED_SOLOMON.md) for the full RS parameter spec.
@@ -207,4 +234,14 @@ cd server && docker compose up --build
 |-----------|------|----------|
 | Server | 8080 | TCP (HTTP) |
 | Agent HTTP | 8000 | TCP (HTTP) |
-| Agent UDP | 9001 | UDP |
+| Agent UDP / QUIC | 9001 | UDP (raw RS blocks in UDP mode; QUIC datagrams in QUIC mode) |
+
+---
+
+## Environment Variables
+
+### Agent
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRANSPORT_MODE` | `udp` | `udp` for raw socket, `quic` for aioquic with TLS 1.3 |

@@ -5,6 +5,7 @@ export interface PeerInfo {
   udp_port: number;
   last_seen: string;
   online: boolean;
+  transport?: "udp" | "quic";
 }
 
 export interface FileMetadata {
@@ -43,6 +44,15 @@ export interface InviteInfo {
   issued_by: string;
   org_id: string;
   expires_at: string;
+}
+
+export interface IncomingConnection {
+  transfer_id: string;
+  peer_id: string;
+  cert_cn: string;
+  cert_fingerprint: string;
+  arrived_at: string;
+  status: "pending" | "accepted" | "rejected";
 }
 
 export interface AppConfig {

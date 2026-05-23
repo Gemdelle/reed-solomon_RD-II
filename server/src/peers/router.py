@@ -48,6 +48,7 @@ class PeerRegistration(BaseModel):
     network_hint: str = "auto"
     group: str = "default"
     invite_token: str | None = None
+    transport: str = "udp"  # "udp" | "quic"
 
 
 class PeerInfo(BaseModel):
@@ -59,6 +60,7 @@ class PeerInfo(BaseModel):
     online: bool
     group: str = "default"
     org_id: str = "dev"
+    transport: str = "udp"  # "udp" | "quic"
 
 
 class ScopeConfig(BaseModel):
@@ -130,6 +132,7 @@ async def _snapshot(org_id: str, caller: CallerInfo) -> list[dict]:
             "online": True,
             "group": peer_group,
             "org_id": org_id,
+            "transport": data.get("transport", "udp"),
         })
     return result
 
@@ -190,6 +193,7 @@ async def register(
         "network_hint": reg.network_hint,
         "group": effective_group,
         "org_id": caller.org_id,
+        "transport": reg.transport,
     })
     await r.expire(key, ttl)
     await _broadcast(caller.org_id, caller)
@@ -202,6 +206,7 @@ async def register(
         online=True,
         group=effective_group,
         org_id=caller.org_id,
+        transport=reg.transport,
     )
 
 
@@ -267,6 +272,7 @@ async def get_peer(
         online=True,
         group=data.get("group", "default"),
         org_id=data.get("org_id", caller.org_id),
+        transport=data.get("transport", "udp"),
     )
 
 

@@ -8,11 +8,11 @@ from config import get_settings
 from rs.decoder import decode_transfer
 from rs.encoder import encode_file
 from rs.models import TransferStatus
-from rs.transport import udp
+from rs.transport import QUICTransport, get_transport
 from server_client import server_client
 from storage.db import insert_transfer, list_history
 from storage.store import FileStorage
-from transfers.models import HistoryEntry, ReceiveRequest, SendRequest, TransferResult
+from transfers.models import HistoryEntry, IncomingConnection, ReceiveRequest, SendRequest, TransferResult
 
 router = APIRouter()
 
@@ -76,7 +76,7 @@ async def send_file(req: SendRequest) -> TransferResult:
             raise HTTPException(502, f"Cannot reach peer: {exc}")
 
     t_send = time.monotonic()
-    await udp.send(packets, target_udp_host, target_udp_port)
+    await get_transport().send(packets, target_udp_host, target_udp_port)
 
     result = TransferResult(
         transfer_id=transfer_id,
@@ -144,7 +144,25 @@ async def receive_transfer(req: ReceiveRequest, background_tasks: BackgroundTask
 
 async def _process_incoming(req: ReceiveRequest) -> None:
     settings = get_settings()
-    packets = await udp.collect(req.transfer_id, timeout=req.timeout)
+    transport = get_transport()
+
+    # If QUIC: wait for operator to approve the incoming cert-authenticated connection
+    # before decoding.  Auto-approves on timeout so the transfer never stalls.
+    if isinstance(transport, QUICTransport):
+        approved = await transport.wait_for_approval(req.transfer_id, timeout=30.0)
+        if not approved:
+            transport.clear_buffer(req.transfer_id)
+            _transfers[req.transfer_id] = {
+                "transfer_id": req.transfer_id,
+                "status": TransferStatus.failed,
+                "recovered_blocks": 0,
+                "total_blocks": 0,
+                "file_id": None,
+                "reason": "rejected_by_operator",
+            }
+            return
+
+    packets = await transport.collect(req.transfer_id, timeout=req.timeout)
     result = decode_transfer(packets, req.checksum)
 
     file_id = None
@@ -191,3 +209,38 @@ async def get_history(limit: int = 50) -> list[HistoryEntry]:
 @router.get("/", response_model=list[TransferResult])
 async def list_transfers() -> list[TransferResult]:
     return [TransferResult(**v) for v in _transfers.values()]
+
+
+# ── Incoming QUIC connection management ───────────────────────────────────────
+
+@router.get("/incoming", response_model=list[IncomingConnection])
+async def list_incoming() -> list[IncomingConnection]:
+    """Return pending/accepted/rejected incoming QUIC connections with cert info."""
+    transport = get_transport()
+    if not isinstance(transport, QUICTransport):
+        return []
+    return [IncomingConnection(**c) for c in transport.list_pending()]
+
+
+@router.post("/incoming/{transfer_id}/accept")
+async def accept_incoming(transfer_id: str) -> dict:
+    """Approve an incoming QUIC connection — the buffered RS blocks will be decoded."""
+    transport = get_transport()
+    if not isinstance(transport, QUICTransport):
+        raise HTTPException(400, "Not running QUIC transport")
+    if transfer_id not in transport._pending_conns:
+        raise HTTPException(404, "Incoming connection not found")
+    transport.approve_connection(transfer_id)
+    return {"ok": True}
+
+
+@router.post("/incoming/{transfer_id}/reject")
+async def reject_incoming(transfer_id: str) -> dict:
+    """Reject an incoming QUIC connection — buffered packets are discarded."""
+    transport = get_transport()
+    if not isinstance(transport, QUICTransport):
+        raise HTTPException(400, "Not running QUIC transport")
+    if transfer_id not in transport._pending_conns:
+        raise HTTPException(404, "Incoming connection not found")
+    transport.reject_connection(transfer_id)
+    return {"ok": True}

@@ -3,6 +3,7 @@ import type {
   DeviceTokenCreate,
   DeviceTokenInfo,
   FileMetadata,
+  IncomingConnection,
   InviteInfo,
   PeerInfo,
   RecommendationResponse,
@@ -162,4 +163,22 @@ export const agentApi = {
     fetch(`${getAgentUrl()}/transfer/`, { headers: authHeaders() }).then((r) =>
       json<TransferResult[]>(r)
     ),
+
+  // Incoming QUIC connections
+  listIncoming: () =>
+    fetch(`${getAgentUrl()}/transfer/incoming`, { headers: authHeaders() }).then((r) =>
+      json<IncomingConnection[]>(r)
+    ),
+
+  acceptIncoming: (transferId: string) =>
+    fetch(`${getAgentUrl()}/transfer/incoming/${transferId}/accept`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => json<{ ok: boolean }>(r)),
+
+  rejectIncoming: (transferId: string) =>
+    fetch(`${getAgentUrl()}/transfer/incoming/${transferId}/reject`, {
+      method: "POST",
+      headers: authHeaders(),
+    }).then((r) => json<{ ok: boolean }>(r)),
 };

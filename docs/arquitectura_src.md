@@ -239,6 +239,92 @@ en el próximo heartbeat; las métricas acumuladas y los device tokens persisten
 
 \newpage
 
+# Capa de Transporte UDP/QUIC
+
+## Abstracción de transporte
+
+El agente abstrae el protocolo de red detrás de una interfaz común `BaseTransport` con cuatro
+operaciones: `start`, `send`, `collect` y `stop`. Las dos implementaciones concretas son
+intercambiables mediante la variable de entorno `TRANSPORT_MODE`:
+
+| Modo | Clase | Características |
+|---|---|---|
+| `udp` (default) | `UDPTransport` | Socket asyncio raw, sin TLS, latencia mínima |
+| `quic` | `QUICTransport` | aioquic sobre el mismo puerto UDP, TLS 1.3, DATAGRAM frames RFC 9221 |
+
+El cambio de modo requiere reinicio del agente. El peer anuncia su modo activo en el registro
+(`POST /peers/register`), y la UI muestra un badge UDP o QUIC en la lista de peers. Si los modos
+no coinciden entre emisor y receptor, la transferencia falla con error descriptivo.
+
+## Modo QUIC: bloques RS sobre DATAGRAM frames
+
+La extensión DATAGRAM de QUIC (RFC 9221) provee frames sin retransmisión dentro de una sesión
+QUIC con TLS 1.3. Esto es exactamente la semántica necesaria para Reed-Solomon: los paquetes
+individuales pueden perderse (el FEC los recupera), pero la sesión está cifrada y autenticada.
+
+Cada bloque RS se envía como un DATAGRAM frame independiente. El tamaño de cada frame debe
+mantenerse por debajo del MTU QUIC (≈ 1164 bytes disponibles), lo que en la práctica limita el
+tamaño efectivo de bloque a ≈ 1 KB.
+
+Al arrancar con `TRANSPORT_MODE=quic`, el agente genera automáticamente un certificado TLS
+autofirmado (RSA-2048, validez 10 años) con `CN=rockdove-{PEER_ID}` y lo almacena en
+`STORAGE_PATH/quic_cert.pem`. Si el `PEER_ID` cambia entre arranques, el certificado anterior
+se descarta y se regenera con el nuevo CN.
+
+## Protocolo CERT_HELLO: identidad de peer en QUIC
+
+Antes de enviar los bloques RS, el emisor envía un datagrama especial de 98+ bytes denominado
+**CERT_HELLO**, que transporta la identidad criptográfica del emisor:
+
+```
+Offset  Tamaño  Campo
+──────  ──────  ─────────────────────────────────────────────────
+0       4       Magic RDCH  (0x52 0x44 0x43 0x48)
+4       1       Versión     (0x01)
+5       1       Longitud del peer_id
+6       N       peer_id     (UTF-8, N ≤ 63 bytes)
+6+N     16      transfer_id (bytes del UUID)
+22+N    64      SHA-256 del certificado PEM del emisor (hex ASCII)
+```
+
+El receptor identifica el CERT_HELLO por el magic `RDCH` y, antes de procesar cualquier bloque
+RS, registra la conexión como **pendiente** con los campos extraídos.
+
+## Flujo de aprobación de conexiones entrantes
+
+```
+Emisor A                     Receptor B
+────────                     ──────────
+send CERT_HELLO ──────────► _on_quic_connect() registra en _pending_conns
+send RS blocks  ──────────► wait_for_approval() espera hasta 30 s
+                             ▲
+                UI B: banner "Conexión QUIC entrante"
+                             │ operador hace clic en Aceptar
+                             ▼
+                          approve_connection() → aprueba
+collect(blocks) ◄──────────  continúa con collect() normal
+```
+
+Si el operador no interactúa en 30 segundos, la conexión **se aprueba automáticamente** para
+no bloquear transferencias en entornos desatendidos. Si el operador rechaza, los bloques RS
+recibidos se descartan y la transferencia queda en estado `failed` con razón `rejected_by_operator`.
+
+## API REST de conexiones entrantes
+
+Los siguientes endpoints permiten a la UI consultar y actuar sobre las conexiones pendientes:
+
+| Endpoint | Descripción |
+|---|---|
+| `GET /transfer/incoming` | Lista conexiones QUIC pendientes con peer_id, cert CN y fingerprint |
+| `POST /transfer/incoming/{tid}/accept` | Aprueba la conexión — los bloques RS se procesan |
+| `POST /transfer/incoming/{tid}/reject` | Rechaza — el buffer se descarta |
+
+La UI consulta `GET /transfer/incoming` cada 3 segundos y muestra un banner flotante por cada
+conexión pendiente, con el peer_id, el Common Name del certificado y el SHA-256 del PEM
+(colapsable para ver el fingerprint completo).
+
+\newpage
+
 # Redundancia Adaptativa
 
 ## Motivación
@@ -440,7 +526,7 @@ No requiere ninguna interacción manual una vez desplegado.
 |---|---|
 | `rs/encoder.py` | Segmentación en bloques, RS encode, construcción de datagramas UDP |
 | `rs/decoder.py` | Colección de bloques recibidos, RS decode con erasure positions, SHA-256 |
-| `rs/transport.py` | Socket UDP async — envío y recepción de datagramas |
+| `rs/transport.py` | Capa de transporte — `BaseTransport` (ABC), `UDPTransport` (UDP raw), `QUICTransport` (aioquic + TLS 1.3 + identidad de peer) |
 | `storage/store.py` | Almacenamiento local de archivos con checksum SHA-256 |
 | `storage/db.py` | Historial de transferencias en SQLite via aiosqlite |
 | `metrics/probe.py` | Sonda RTT/jitter en background cada 60 segundos |
@@ -531,7 +617,8 @@ se reinicia se vuelve a registrar en el próximo ciclo sin intervención humana.
 | `SERVER_URL` | URL del servidor central | `http://localhost:8080` |
 | `PEER_ID` | Identificador único de este peer | `default-peer` |
 | `AGENT_API_URL` | URL HTTP pública de este agente (registrada en el servidor) | autodetectada |
-| `UDP_PORT` | Puerto UDP para recibir bloques RS | `9001` |
+| `UDP_PORT` | Puerto UDP/QUIC para recibir bloques RS | `9001` |
+| `TRANSPORT_MODE` | Protocolo de transporte: `udp` (raw) o `quic` (TLS 1.3) | `udp` |
 | `STORAGE_PATH` | Ruta de almacenamiento local | `~/.local/share/rockdove` |
 | `AGENT_SERVICE_TOKEN` | Device token autogenerado por el admin | vacío |
 | `NETWORK_HINT` | Perfil de red: `lan`, `wifi`, `cellular`, `satellite`, `auto` | `auto` |
@@ -584,3 +671,5 @@ El servidor central solo requiere **8080 TCP** abierto. No necesita acceso UDP.
 | `aiosqlite` | Historial persistente de transferencias en SQLite |
 | `pydantic-settings` | Configuración via `.env` o variables de entorno |
 | `uvicorn` | Servidor ASGI para la API local del agente |
+| `aioquic` | Transporte QUIC (RFC 9000) con DATAGRAM extension (RFC 9221) para bloques RS |
+| `cryptography` | Generación de certificados TLS autofirmados para el transporte QUIC |

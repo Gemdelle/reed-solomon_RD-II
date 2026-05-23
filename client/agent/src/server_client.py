@@ -24,7 +24,12 @@ class ServerClient:
         return {"Authorization": f"Bearer {token}"} if token else {}
 
     async def register(
-        self, peer_id: str, api_url: str, udp_host: str, udp_port: int
+        self,
+        peer_id: str,
+        api_url: str,
+        udp_host: str,
+        udp_port: int,
+        transport: str = "udp",
     ) -> dict:
         body: dict = {
             "peer_id": peer_id,
@@ -32,6 +37,7 @@ class ServerClient:
             "udp_host": udp_host,
             "udp_port": udp_port,
             "network_hint": self._settings.NETWORK_HINT,
+            "transport": transport,
         }
         if self._settings.INVITE_TOKEN:
             body["invite_token"] = self._settings.INVITE_TOKEN
