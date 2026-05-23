@@ -1,3 +1,10 @@
+# [1.1.0-beta.3](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.2...v1.1.0-beta.3) (2026-05-23)
+
+
+### Bug Fixes
+
+* trigger release ([3915876](https://github.com/Gemdelle/reed-solomon_RD-II/commit/3915876283c7e9627e554ab9a35da8ba7964b760))
+
 # [1.1.0-beta.2](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.1...v1.1.0-beta.2) (2026-05-23)
 
 
