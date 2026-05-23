@@ -23,10 +23,11 @@
 | Agent: `report_metrics()` | ✅ llamada post-transfer (loss_rate) y en background RTT probe |
 | Agent: medición real de RTT/jitter/loss | ✅ `metrics/probe.py` — HTTP RTT a peers cada 60s |
 | Persistencia en servidor | ✅ Redis — peers con TTL, métricas con LPUSH/LTRIM |
+| Transfer history persistido | ✅ SQLite en agente (`storage/db.py`) + `GET /transfer/history` |
+| Documentación de infraestructura de red | ✅ `docs/NETWORK_INFRA.md` — escenarios, matriz, recomendaciones |
 | Feature flags | ❌ no existe |
 | Dynamic FEC | ❌ estático por transferencia |
 | NAT traversal / relay | ❌ no existe |
-| Transfer history persistido | ✅ SQLite en agente (`storage/db.py`) + `GET /transfer/history` |
 
 ---
 
@@ -107,7 +108,7 @@ Fix: detección server-side. La UI ahora sondea `GET /peers/scopes`: respuesta 2
 
 ---
 
-## P1 — Diferenciadores académicos (lo que lo hace interesante)
+## P1 — Diferenciadores académicos
 
 ### P1.1 · Dynamic Adaptive FEC
 **Por qué:** esto es el salto de "TP con RS" a "adaptive FEC platform". Es el feature más innovador.
@@ -142,25 +143,7 @@ class TransferResult(BaseModel):
 
 ---
 
-### P1.2 · Peer Invite Tokens
-**Por qué:** agrega un trust graph real. A puede autorizar a B sin que el servidor intermedie la identidad. Crítico para IoT/edge.
-
-**Estado:** ✅ implementado para el flujo headless/IoT (admin panel genera snippets `.env`). Pendiente: flujo peer-a-peer sin panel admin.
-
-**Flujo pendiente:**
-1. Peer A autenticado llama `POST /invites` → servidor genera JWT firmado:
-   ```json
-   { "issued_by": "peer-alice", "org_id": "org-123", "exp": 1234567890 }
-   ```
-2. A le pasa el token a B (out-of-band: QR, email, etc.)
-3. B llama `POST /peers/register` incluyendo el token → servidor valida firma, asocia B a la org
-4. Sin token, el peer queda en estado `pending` (visible solo para admins)
-
-**Complejidad restante:** S
-
----
-
-### P1.3 · Network Profiles
+### P1.2 · Network Profiles
 **Por qué:** en lugar de que el usuario ajuste el slider sin contexto, el sistema sugiere un perfil y explica por qué.
 
 **Dónde:** `server/src/metrics/recommender.py` + `client/agent/src/config.py`
@@ -183,7 +166,7 @@ PROFILES = {
 
 ---
 
-### ✅ P1.4 · OIDC real con Keycloak — completado (client + server)
+### ✅ P1.3 · OIDC real con Keycloak — completado (client + server)
 
 El flujo SSO está operativo end-to-end:
 
@@ -202,21 +185,102 @@ El flujo SSO está operativo end-to-end:
 
 ---
 
-## P2 — Feature flags y observabilidad
+## P2 — Distribución enterprise y conectividad
 
-### P2.1 · Feature Flags en servidor
-**Por qué:** permite activar/desactivar features por ambiente sin redeploy. Crítico para gradual rollout.
+### P2.1 · Peer Capability System
+**Por qué:** prerequisito para el relay. El servidor necesita saber qué peers pueden actuar como
+relay antes de poder sugerirlos como intermediarios.
+
+**Dónde:** `server/src/peers/router.py` + `client/agent/src/server_client.py`
+
+**Implementación:** el agente anuncia capacidades en el heartbeat:
+
+```python
+class HeartbeatPayload(BaseModel):
+    relay_capable: bool = False      # puede actuar como relay
+    store_and_forward: bool = False  # puede encolar transferencias para peers offline
+    network_hint: str = "auto"       # lan / wifi / cellular / satellite
+    bandwidth_class: str = "unknown" # low / medium / high
+```
+
+El servidor expone estas capacidades en `GET /peers` para que los emisores puedan elegir
+rutas inteligentemente.
+
+**Complejidad:** S
+
+---
+
+### P2.2 · Relay Fallback (peer-to-peer via relay nativo)
+**Por qué:** desbloquea casos donde el UDP directo no funciona — NAT sin forwarding, redes
+segmentadas, peers móviles sin VPN. Elimina la dependencia de infraestructura externa para la
+conectividad básica.
+
+**Escenario:**
+```
+Peer A (NAT) ──► Relay C (IP pública) ──► Peer B (NAT)
+```
+
+**Protocolo:**
+1. El sender intenta `POST /transfer/receive` directo a B — si falla (timeout / error), pasa al paso 2.
+2. El sender consulta al servidor: `GET /peers/relay?target={peer_b_id}` — el servidor retorna
+   el relay con mejor conectividad con B, priorizando peers con `relay_capable=true`.
+3. El sender envía bloques UDP al relay. El relay re-encapsula y reenvía a B.
+4. El relay puede **re-calcular redundancia** para el segundo hop si ese link tiene peor calidad.
+
+**Dónde:**
+- `server/src/peers/router.py` — nuevo endpoint `GET /peers/relay`
+- `client/agent/src/rs/transport.py` — modo relay en el sender
+- `client/agent/src/transfers/router.py` — lógica de relay receiver
+
+**Complejidad:** L
+**Dependencia:** P2.1 (necesita capabilities en heartbeat)
+
+---
+
+### P2.3 · Store-and-Forward para peers offline
+**Por qué:** en topologías con conectividad intermitente (satélite, industrial, campo), el receptor
+puede no estar online cuando el emisor envía. El relay almacena y entrega cuando el peer vuelve.
+
+**Escenario:**
+```
+HQ envía → Relay concentrador → [Sensor offline]
+                               ↓ vuelve online
+                               ← relay entrega los bloques almacenados
+```
+
+**Implementación:**
+- El relay con `store_and_forward=true` acepta transferencias para peers offline.
+- Almacena los bloques RS en disco temporalmente (TTL configurable).
+- Cuando el peer target se registra o hace heartbeat, el relay inicia la entrega.
+- El peer emisor recibe confirmación del relay (no del destinatario final) — el estado de la
+  transferencia pasa a `relayed` hasta que el destinatario confirme recepción.
+
+**Nuevo estado de transferencia:**
+
+| Estado | Significado |
+|---|---|
+| `ok` | Recibido y verificado por el destinatario final |
+| `degraded` | RS recovery en tránsito, recibido íntegro |
+| `relayed` | En cola en el relay, pendiente de entrega al destinatario |
+| `failed` | No recuperable o expiró en el relay |
+
+**Complejidad:** L
+**Dependencia:** P2.2 (relay básico primero)
+
+---
+
+### P2.4 · Feature Flags en servidor
+**Por qué:** permite activar relay, store-and-forward y dynamic FEC por ambiente sin redeploy.
+Crítico para gradual rollout de los features de P2.
 
 **Dónde:** nuevo `server/src/features/router.py`
 
 ```python
-# server/src/features/router.py
 FEATURES = {
-    "dynamic_fec":      os.getenv("FF_DYNAMIC_FEC", "false") == "true",
-    "invite_tokens":    os.getenv("FF_INVITE_TOKENS", "false") == "true",
-    "relay_fallback":   os.getenv("FF_RELAY_FALLBACK", "false") == "true",
-    "quic_transport":   os.getenv("FF_QUIC_TRANSPORT", "false") == "true",
-    "oidc_required":    os.getenv("FF_OIDC_REQUIRED", "false") == "true",
+    "dynamic_fec":        os.getenv("FF_DYNAMIC_FEC", "false") == "true",
+    "relay_fallback":     os.getenv("FF_RELAY_FALLBACK", "false") == "true",
+    "store_and_forward":  os.getenv("FF_STORE_AND_FORWARD", "false") == "true",
+    "quic_transport":     os.getenv("FF_QUIC_TRANSPORT", "false") == "true",
 }
 
 @router.get("/")
@@ -224,13 +288,14 @@ async def get_features() -> dict:
     return FEATURES
 ```
 
-Agent lo lee al arrancar y guarda en un singleton `features`. Cada codepath que implementa una feature nueva hace `if features.dynamic_fec:`.
+Agent lo lee al arrancar y guarda en un singleton `features`. Cada codepath nuevo hace
+`if features.relay_fallback:`.
 
 **Complejidad:** S
 
 ---
 
-## ✅ P2.2 · Historial de transferencias SQLite — COMPLETADO
+### ✅ P2.5 · Historial de transferencias SQLite — COMPLETADO
 
 - `storage/db.py` — init, insert, list con `aiosqlite`
 - Persiste sent (con `peer_id`, `filename`, `redundancy`, `quality`) y received (con `file_size`, `recovered_blocks`)
@@ -239,7 +304,23 @@ Agent lo lee al arrancar y guarda en un singleton `features`. Cada codepath que 
 
 ---
 
-## ✅ Headless Agent Deployment — COMPLETADO
+### P2.6 · PostgreSQL + historial de métricas en servidor
+**Por qué:** con Redis se pierde el historial al reiniciar (aunque el TTL es alto). Con Postgres
+se puede analizar tendencias históricas, mejorar el recommender con datos reales acumulados, y
+tener auditoría de transferencias para el relay.
+
+**Dónde:** `server/src/db/` con SQLAlchemy async
+
+Tablas mínimas:
+- `peer_metrics(peer_id, ts, rtt_ms, jitter_ms, loss_rate)`
+- `transfers_audit(transfer_id, sender, receiver, relay, bytes, status, ts)`
+
+**Complejidad:** L
+**Dependencia:** P0.2 (Redis primero, Postgres como upgrade)
+
+---
+
+## ✅ P2.x · Headless Agent Deployment — COMPLETADO
 
 ### Qué hay
 
@@ -336,41 +417,31 @@ AGENT_SERVICE_TOKEN=rd_dW6awd00XpaS1... \
 
 ---
 
-### P2.3 · PostgreSQL + historial de métricas en servidor
-**Por qué:** con Redis se pierde el historial al reiniciar. Con Postgres se puede analizar tendencias, mejorar el recommender.
-
-**Dónde:** `server/src/db/` con SQLAlchemy async
-
-Tablas mínimas:
-- `peer_metrics(peer_id, ts, rtt_ms, jitter_ms, loss_rate)`
-- `transfers_audit(transfer_id, sender, receiver, bytes, status, ts)`
-
-**Complejidad:** L
-**Dependencia:** P0.2 (Redis primero, Postgres como upgrade)
-
----
-
 ## P3 — Roadmap ambicioso
 
 | Feature | Descripción | Complejidad |
 |---|---|---|
-| **QUIC transport** | Reemplazar raw UDP con `aioquic`. Da encryption, multiplexing, congestion control. RS FEC encima de QUIC stream. | XL |
-| **NAT hole punching** | Servidor como signaling relay: coordina intercambio de IPs para que ambos peers se puedan ver detrás de NAT | L |
-| **Relay fallback** | Si UDP directo falla N veces, chunks van por el servidor como relay hasta que la conexión directa se establezca | L |
-| **Smart routing** | Server puede sugerir `A → relay_peer_C → B` si C tiene mejor conectividad con B que A directamente | XL |
-| **Peer capability system** | Agent reporta `{cpu_score, ram_mb, network_type}` en heartbeat. Server puede restar redundancy para nodos lentos | M |
-| **ML redundancy** | Reemplazar tabla de umbrales hardcodeada por modelo simple (regresión logística) entrenado sobre historial de transferencias | L |
+| **NAT hole punching activo** | Servidor como signaling relay: coordina intercambio de IPs + STUN para que ambos peers establezcan UDP directo detrás de NAT | L |
+| **QUIC transport** | Reemplazar raw UDP con `aioquic`. Da encryption nativa, multiplexing, congestion control. RS FEC encima de QUIC stream. | XL |
+| **Smart routing multi-hop** | Server sugiere `A → relay_C → relay_D → B` basado en graph de conectividad entre peers. Optimización de ruta por latencia + costo | XL |
+| **ML redundancy** | Reemplazar tabla de umbrales hardcodeada por modelo simple (regresión logística) entrenado sobre historial de transferencias. Input: RTT, jitter, loss histórico, network_hint | L |
+| **Peer-to-peer invite flow** | A genera un JWT de invitación fuera de banda (QR, email). B lo usa para registrarse en la org de A sin intervención del admin | S |
 
 ---
 
 ## Secuencia de sprints sugerida
 
 ```
-Sprint 1 (P0):   Redis en server · métricas desde transfers
+Sprint 1 (P0):   ✅ Redis en server · métricas desde transfers
 Sprint 2 (P1a):  dynamic FEC · network profiles
-Sprint 3 (P1b + P2.1): peer-to-peer invite tokens · feature flags
-Sprint 4 (P2.2 + P2.3): historial SQLite en agent · PostgreSQL en server
-Sprint 5 (P3):   NAT hole punching · relay fallback
+Sprint 3 (P1b):  feature flags · peer capability system
+Sprint 4 (P2a):  relay fallback básico (UDP direct → relay fallback)
+Sprint 5 (P2b):  store-and-forward · historial relay en SQLite
+Sprint 6 (P3):   NAT hole punching activo · QUIC transport
 ```
 
-Lo más importante del Sprint 1 es que el adaptive redundancy funciona de verdad — el sistema mide pérdida real en las transferencias y el recomendador tiene datos para operar. Ese es el feature que le da valor académico al TP y actualmente es un cascarón vacío.
+**El feature con mayor impacto académico es dynamic FEC (P1.1):** transforma el sistema de
+"archivo con RS estático" a "plataforma con FEC adaptativo en tiempo real".
+
+**El feature con mayor impacto de producto es el relay (P2.2):** desbloquea todos los escenarios
+donde el UDP directo no funciona — que es la mayoría de los entornos de internet pública.
