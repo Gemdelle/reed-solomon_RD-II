@@ -4,6 +4,7 @@ Handles peer registration, heartbeat, peer discovery, and metrics reporting.
 """
 import httpx
 
+import token_store
 from config import get_settings
 
 _DEFAULT_REDUNDANCY = 0.25
@@ -19,7 +20,7 @@ class ServerClient:
 
     @property
     def _auth_headers(self) -> dict[str, str]:
-        token = self._settings.AGENT_SERVICE_TOKEN
+        token = self._settings.AGENT_SERVICE_TOKEN or token_store.get_token()
         return {"Authorization": f"Bearer {token}"} if token else {}
 
     async def register(

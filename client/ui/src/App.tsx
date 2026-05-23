@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { AppConfig } from "./types";
 import ConnectPage from "./pages/ConnectPage";
 import DashboardPage from "./pages/DashboardPage";
-import { serverApi } from "./api";
+import { agentApi, serverApi } from "./api";
 import { handleCallback, initOidc } from "./auth/oidc";
 
 function loadConfig(): AppConfig | null {
@@ -42,6 +42,7 @@ export default function App() {
               console.log("[App] User authenticated:", user.profile.sub);
               localStorage.setItem("peerId", user.profile.sub ?? "oidc-user");
               localStorage.setItem("token", user.access_token ?? "");
+              agentApi.setToken(user.access_token ?? "").catch(() => {});
               setConfig(loadConfig());
             }
           } catch (err) {
@@ -74,6 +75,7 @@ export default function App() {
               const peerId = user.profile.sub ?? "oidc-user";
               localStorage.setItem("peerId", peerId);
               localStorage.setItem("token", user.access_token ?? "");
+              agentApi.setToken(user.access_token ?? "").catch(() => {});
               history.replaceState({}, "", window.location.pathname);
             }
             setCallbackPending(false);

@@ -40,7 +40,7 @@ npm run dev
 - `vite` → `http://localhost:5173`
 - `tsc -p electron/tsconfig.json && electron .` → opens the window
 
-The Electron main process spawns the agent with `uv run uvicorn main:app …` in dev and the compiled binary in production.
+In dev mode the agent runs via `uv run uvicorn main:app …` — no compiled binary is needed. The binary is only required for packaged distribution.
 
 ## Build & release
 
@@ -52,7 +52,56 @@ npm run dist:local     # → dist/app/
 npm run release
 ```
 
+**Important:** run `./scripts/build-agent.sh` before `npm run dist:local`. The script compiles the Python agent with PyInstaller and copies the output to `resources/agent/rs-agent`. If the binary is missing or stale, the packaged app will fail to start the agent.
+
 Targets: Linux AppImage, Windows NSIS, macOS DMG (x64 + arm64).
+
+## OIDC login flow
+
+Electron cannot complete a standard OAuth redirect internally — the Keycloak redirect URI would land inside a webview with no way for the renderer to access the authorization code. Instead, RockDove uses a loopback flow: the system browser handles the Keycloak interaction and the agent (running on `127.0.0.1:8000`) acts as the redirect URI target.
+
+The full sequence is:
+
+1. User clicks "Login with SSO" in the UI.
+2. `startLogin()` calls `_manager._client.createSigninRequest()` to build the authorization URL with PKCE. The PKCE verifier and state are stored in `sessionStorage`.
+3. The URL is opened in the system browser via `window.rsAgent.openExternal(url)` → Electron `shell.openExternal()`.
+4. The user authenticates in Keycloak. Keycloak redirects to `http://127.0.0.1:8000/auth/callback?code=...&state=...`.
+5. The agent stores `{code, state}` in an in-memory `_auth_store` and returns an HTML page that auto-closes after 3 seconds.
+6. The UI polls `GET /auth/poll` every 1 second.
+7. When the code arrives, the UI calls `_manager.signinCallback(url)` with the reconstructed callback URL to complete the PKCE token exchange with Keycloak directly from the renderer.
+8. The UI stores `access_token` in `localStorage` and immediately calls `agentApi.setToken(accessToken)`.
+9. The agent stores the JWT in `token_store` and re-registers with the server. The server assigns `peer_id = JWT sub` and returns it; the agent stores it in `token_store` for the heartbeat loop.
+
+**Why the push in step 8 is required:** the agent starts before the user logs in and has no JWT at that point. Without the explicit push via `POST /auth/token`, the agent would have no credentials to authenticate its registration request to the server in OIDC mode, and all subsequent server calls would fail with 401.
+
+## JWT push to agent
+
+After a successful OIDC login the UI calls:
+
+```ts
+await agentApi.setToken(accessToken);
+```
+
+This posts `{"token": "<jwt>"}` to `POST /auth/token` on the agent. The agent:
+1. Stores the token in `token_store` (used for all subsequent server HTTP calls).
+2. Immediately re-registers with the server using the JWT as the `Authorization: Bearer` header.
+3. Stores the server-assigned `peer_id` (which equals the JWT `sub` claim in OIDC mode).
+
+The heartbeat loop then reads `token_store.get_peer_id()` for its requests rather than the `PEER_ID` environment variable, because in OIDC mode the server controls peer ID assignment.
+
+## Preload API
+
+`electron/preload.ts` runs in an isolated context before the renderer loads and exposes one object via `contextBridge`:
+
+```ts
+window.rsAgent = {
+  baseUrl: string,                               // always "http://127.0.0.1:8000"
+  openExternal?: (url: string) => void,          // opens url in the system browser
+  onOidcCallback?: (cb: (url: string) => void) => void,  // legacy, unused
+}
+```
+
+The UI reads `window.rsAgent.baseUrl` for all agent API calls. No Electron IPC is needed — everything goes through HTTP. `openExternal` is used exclusively during the OIDC login flow to open the Keycloak authorization URL in the system browser.
 
 ## Electron source
 
@@ -60,20 +109,14 @@ Targets: Linux AppImage, Windows NSIS, macOS DMG (x64 + arm64).
 
 | Responsibility | Detail |
 |---|---|
-| Agent lifecycle | `startAgent()` / `stopAgent()` — spawns the binary or `uv run uvicorn` in dev |
+| Agent lifecycle | `startAgent()` / `stopAgent()` — spawns `uv run uvicorn` in dev or `process.resourcesPath/agent/rs-agent` in packaged mode |
 | Health gate | `waitForAgent()` — polls `GET /health` with 500 ms intervals, up to 40 attempts, before opening the window |
 | Window | `createWindow()` — loads `ui/dist/index.html` (packaged) or `http://localhost:5173` (dev) |
-| External links | `shell.openExternal` for any `window.open` calls from the renderer |
+| External links | `shell.openExternal` for any navigation that leaves the app origin, including OIDC auth URLs |
 
 ### `electron/preload.ts`
 
-Runs in an isolated context before the renderer loads. Exposes one object via `contextBridge`:
-
-```ts
-window.rsAgent = { baseUrl: "http://127.0.0.1:8000" }
-```
-
-The UI reads `window.rsAgent.baseUrl` for all agent API calls. No Electron IPC is needed — everything goes through HTTP.
+Exposes `window.rsAgent` via `contextBridge`. See [Preload API](#preload-api) above.
 
 ## Tests
 

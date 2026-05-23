@@ -4,6 +4,7 @@ import type {
   InviteInfo,
   PeerInfo,
   RecommendationResponse,
+  ScopeConfig,
   TransferResult,
 } from "./types";
 
@@ -61,9 +62,24 @@ export const serverApi = {
       body: JSON.stringify({ ttl_seconds }),
     }).then((r) => json<InviteInfo>(r)),
 
+  getScopes: () =>
+    fetch(`${getServerUrl()}/peers/scopes`, { headers: authHeaders() }).then(
+      (r) => json<ScopeConfig>(r)
+    ),
+
+  setScopes: (cfg: ScopeConfig) =>
+    fetch(`${getServerUrl()}/peers/scopes`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(cfg),
+    }).then((r) => json<ScopeConfig>(r)),
+
   /** Returns a WebSocket that streams the peer list in real-time. */
-  watchPeers: (serverUrl: string): WebSocket =>
-    new WebSocket(`${serverUrl.replace(/^http/, "ws")}/peers/watch`),
+  watchPeers: (serverUrl: string, token?: string | null): WebSocket => {
+    const base = `${serverUrl.replace(/^http/, "ws")}/peers/watch`;
+    const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
+    return new WebSocket(url);
+  },
 };
 
 // ── Agent API (data plane) ────────────────────────────────────────────────────
@@ -71,6 +87,13 @@ export const serverApi = {
 export const agentApi = {
   health: () =>
     fetch(`${getAgentUrl()}/health`).then((r) => json<{ status: string }>(r)),
+
+  setToken: (token: string) =>
+    fetch(`${getAgentUrl()}/auth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    }).then((r) => json<{ ok: boolean }>(r)),
 
   // Files
   listFiles: () =>

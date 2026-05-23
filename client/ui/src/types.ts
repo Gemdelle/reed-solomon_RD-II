@@ -52,3 +52,7 @@ export interface AppConfig {
   token: string | null;
   inviteToken?: string | null;
 }
+
+export interface ScopeConfig {
+  scopes: Record<string, string[]>;
+}

@@ -5,6 +5,8 @@ import FileList from "../components/FileList";
 import PeerList from "../components/PeerList";
 import TransferDialog from "../components/TransferDialog";
 import TransferHistory from "../components/TransferHistory";
+import AdminPanel from "../components/AdminPanel";
+
 
 interface Props {
   config: AppConfig;
@@ -17,17 +19,21 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
   const [transferTarget, setTransferTarget] = useState<{ peer: PeerInfo; file?: FileMetadata } | null>(null);
   const [transfers, setTransfers] = useState<TransferResult[]>([]);
   const [networkProfile, setNetworkProfile] = useState<string>("");
-  const [inviteToken, setInviteToken] = useState<string | null>(null);
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Detect admin by probing the scopes endpoint (403 = not admin, 200 = admin)
+  useEffect(() => {
+    serverApi.getScopes().then(() => setIsAdmin(true)).catch(() => setIsAdmin(false));
+  }, [config.serverUrl, config.token]);
 
   // WebSocket peer discovery
   useEffect(() => {
     let retryTimer: ReturnType<typeof setTimeout>;
 
     function connect() {
-      const ws = serverApi.watchPeers(config.serverUrl);
+      const ws = serverApi.watchPeers(config.serverUrl, config.token);
       wsRef.current = ws;
 
       ws.onopen = () => setServerOnline(true);
@@ -52,7 +58,7 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
       clearTimeout(retryTimer);
       wsRef.current?.close();
     };
-  }, [config.serverUrl, config.peerId]);
+  }, [config.serverUrl, config.peerId, config.token]);
 
   // Fetch own network profile
   useEffect(() => {
@@ -78,19 +84,6 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
     setTransfers((prev) => [result, ...prev]);
     setTransferTarget(null);
   };
-
-  async function handleCreateInvite() {
-    setInviteLoading(true);
-    try {
-      const info = await serverApi.createInvite();
-      setInviteToken(info.token);
-      setShowInviteModal(true);
-    } catch {
-      // silently ignore — server may not have invite support or auth may be missing
-    } finally {
-      setInviteLoading(false);
-    }
-  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-950">
@@ -122,14 +115,15 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
           <span className="text-slate-500 text-xs">
             {peers.filter((p) => p.online).length} peers online
           </span>
-          <button
-            onClick={handleCreateInvite}
-            disabled={inviteLoading}
-            title="Generar token de invitación"
-            className="text-xs text-slate-400 hover:text-slate-200 disabled:opacity-40 bg-slate-800 hover:bg-slate-700 rounded px-2.5 py-1 transition-colors"
-          >
-            {inviteLoading ? "…" : "+ Invitar"}
-          </button>
+          {isAdmin && (
+            <button
+              onClick={() => setShowAdmin(true)}
+              title="Panel de administración"
+              className="text-xs text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 rounded px-2.5 py-1 transition-colors"
+            >
+              Admin
+            </button>
+          )}
           <button
             onClick={onDisconnect}
             className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
@@ -162,35 +156,8 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
         />
       )}
 
-      {/* Invite token modal */}
-      {showInviteModal && inviteToken && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <h3 className="text-sm font-medium text-slate-200 mb-2">Token de invitación generado</h3>
-            <p className="text-xs text-slate-500 mb-4">
-              Compartí este token con el nuevo peer. Es de un solo uso y expira en 1 hora.
-              El peer debe colocarlo como <code className="text-slate-400">INVITE_TOKEN</code> en su <code className="text-slate-400">.env</code>.
-            </p>
-            <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 mb-4 break-all">
-              <p className="text-xs font-mono text-slate-300 select-all">{inviteToken}</p>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => navigator.clipboard.writeText(inviteToken)}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg py-2 text-xs transition-colors"
-              >
-                Copiar
-              </button>
-              <button
-                onClick={() => { setShowInviteModal(false); setInviteToken(null); }}
-                className="flex-1 bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-2 text-xs transition-colors"
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Admin panel */}
+      {showAdmin && <AdminPanel onClose={() => setShowAdmin(false)} />}
     </div>
   );
 }

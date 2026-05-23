@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 from config import get_settings
 from files.router import router as files_router
@@ -11,17 +12,19 @@ from metrics.probe import rtt_probe_loop
 from peers.router import router as peers_router
 from rs.transport import udp
 from server_client import server_client
+import token_store
 from transfers.router import router as transfers_router
 
 _HEARTBEAT_INTERVAL_S = 15
 _auth_store: dict = {}
 
 
-async def _heartbeat_loop(peer_id: str) -> None:
+async def _heartbeat_loop() -> None:
     while True:
         await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
         try:
-            await server_client.heartbeat(peer_id)
+            pid = token_store.get_peer_id() or get_settings().PEER_ID
+            await server_client.heartbeat(pid)
         except Exception:
             pass
 
@@ -31,15 +34,16 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     await udp.start(settings.UDP_HOST, settings.UDP_PORT)
     try:
-        await server_client.register(
+        result = await server_client.register(
             peer_id=settings.PEER_ID,
             api_url=settings.AGENT_API_URL,
             udp_host=settings.UDP_HOST,
             udp_port=settings.UDP_PORT,
         )
+        token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
     except Exception:
         pass
-    heartbeat_task = asyncio.create_task(_heartbeat_loop(settings.PEER_ID))
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
     probe_task = asyncio.create_task(rtt_probe_loop())
     yield
     heartbeat_task.cancel()
@@ -85,3 +89,28 @@ async def auth_callback(code: str, state: str):
 async def auth_poll():
     """La UI llama aquí para ver si ya llegó el código."""
     return _auth_store.pop("last", None)
+
+
+class TokenPayload(BaseModel):
+    token: str
+
+
+@app.post("/auth/token", tags=["auth"])
+async def push_token(body: TokenPayload):
+    """
+    UI pushes the OIDC access token here after login.
+    Agent stores it and re-registers with the central server.
+    """
+    token_store.set_token(body.token)
+    settings = get_settings()
+    try:
+        result = await server_client.register(
+            peer_id=settings.PEER_ID,
+            api_url=settings.AGENT_API_URL,
+            udp_host=settings.UDP_HOST,
+            udp_port=settings.UDP_PORT,
+        )
+        token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
+    except Exception:
+        pass
+    return {"ok": True}
