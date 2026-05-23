@@ -6,6 +6,14 @@
 * QUIC and OIDC fixes ([8153c7b](https://github.com/Gemdelle/reed-solomon_RD-II/commit/8153c7bf3ec305604fbf07fe8c2853ae8a7563cd))
 * QUIC and OIDC fixes ([42388e6](https://github.com/Gemdelle/reed-solomon_RD-II/commit/42388e6f40f0b7094a65d39ba17f90f6f5492007))
 
+# [1.1.0-beta.2](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.1...v1.1.0-beta.2) (2026-05-23)
+
+
+### Bug Fixes
+
+* QUIC and OIDC fixes ([8153c7b](https://github.com/Gemdelle/reed-solomon_RD-II/commit/8153c7bf3ec305604fbf07fe8c2853ae8a7563cd))
+* QUIC and OIDC fixes ([42388e6](https://github.com/Gemdelle/reed-solomon_RD-II/commit/42388e6f40f0b7094a65d39ba17f90f6f5492007))
+
 # [1.1.0-beta.1](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.0.0...v1.1.0-beta.1) (2026-05-23)
 
 ### Features
