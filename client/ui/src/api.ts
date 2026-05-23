@@ -1,5 +1,7 @@
 import type {
   AuthConfig,
+  DeviceTokenCreate,
+  DeviceTokenInfo,
   FileMetadata,
   InviteInfo,
   PeerInfo,
@@ -73,6 +75,27 @@ export const serverApi = {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(cfg),
     }).then((r) => json<ScopeConfig>(r)),
+
+  // Device tokens
+  createDeviceToken: (body: DeviceTokenCreate) =>
+    fetch(`${getServerUrl()}/device-tokens/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(body),
+    }).then((r) => json<DeviceTokenInfo>(r)),
+
+  listDeviceTokens: () =>
+    fetch(`${getServerUrl()}/device-tokens/`, { headers: authHeaders() }).then(
+      (r) => json<DeviceTokenInfo[]>(r)
+    ),
+
+  revokeDeviceToken: (id: string) =>
+    fetch(`${getServerUrl()}/device-tokens/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    }).then((r) => {
+      if (!r.ok && r.status !== 204) throw new Error(`${r.status}`);
+    }),
 
   /** Returns a WebSocket that streams the peer list in real-time. */
   watchPeers: (serverUrl: string, token?: string | null): WebSocket => {

@@ -9,6 +9,7 @@ dependencies = [
     "reedsolo==1.7.0",
     "pydantic-settings==2.7.0",
     "python-multipart==0.0.20",
+    "aiosqlite>=0.20",
 ]
 
 [dependency-groups]

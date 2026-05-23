@@ -1,0 +1,47 @@
+sequenceDiagram
+    actor Admin as Admin
+    participant UI as React UI
+    participant KC as Keycloak
+    participant SRV as Servidor Central
+    participant RD as Redis
+    actor Dev as Operador
+
+    rect rgb(232, 244, 253)
+        Note over Admin,KC: Autenticación de usuario humano (OIDC)
+        Admin->>UI: Clic "Iniciar sesión"
+        UI->>KC: Genera URL PKCE → abre browser del sistema
+        KC-->>Admin: Formulario de login
+        Admin->>KC: Credenciales
+        KC-->>UI: Redirect con código OIDC
+        UI->>KC: Intercambia código → JWT
+        KC-->>UI: access_token (sub, groups, realm)
+        UI->>SRV: POST /peers/register\nAuthorization: Bearer <jwt>
+        SRV->>KC: Valida JWT via JWKS
+        KC-->>SRV: OK — sub=peer-id, groups=[admin]
+        SRV->>RD: HSET peer:{org}:{id} + EXPIRE 30s
+        SRV-->>UI: PeerInfo registrado
+    end
+
+    rect rgb(255, 243, 224)
+        Note over Admin,Dev: Generación de token para dispositivo headless
+        Admin->>UI: Abre panel admin → Device Tokens
+        UI->>SRV: POST /device-tokens\n{label, peer_id, ttl_seconds}
+        SRV->>RD: HSET device_token:{valor} + índice
+        SRV-->>UI: DeviceTokenInfo con token completo
+        UI-->>Admin: Muestra token (solo esta vez)
+        Admin->>Dev: Envía token out-of-band (seguro)
+    end
+
+    rect rgb(232, 245, 233)
+        Note over Dev,SRV: Autenticación del agente headless
+        Dev->>Dev: AGENT_SERVICE_TOKEN=rd_... en .env
+        Dev->>SRV: POST /peers/register\nAuthorization: Bearer rd_...
+        SRV->>RD: GET device_token:{rd_...} → metadata
+        RD-->>SRV: {org_id, peer_id, expires_at}
+        SRV->>RD: HSET peer:{org}:{peer_id} + EXPIRE 30s
+        SRV-->>Dev: PeerInfo — agente online
+        loop cada 15 segundos
+            Dev->>SRV: POST /peers/{id}/heartbeat\nBearer rd_...
+            SRV->>RD: EXPIRE peer:{id} 30s
+        end
+    end

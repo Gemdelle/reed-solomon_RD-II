@@ -3,6 +3,21 @@ from pydantic import BaseModel, field_validator
 from rs.models import TransferStatus
 
 
+class HistoryEntry(BaseModel):
+    id: str
+    ts: str
+    direction: str          # "sent" | "received"
+    peer_id: str | None = None
+    filename: str | None = None
+    bytes: int | None = None
+    status: str
+    redundancy: float | None = None
+    recovered_blocks: int = 0
+    total_blocks: int = 0
+    quality: str | None = None
+    profile_name: str | None = None
+
+
 class SendRequest(BaseModel):
     file_id: str
     target_peer_id: str
@@ -33,3 +48,6 @@ class TransferResult(BaseModel):
     total_blocks: int = 0
     file_id: str | None = None
     reason: str | None = None
+    effective_redundancy: float | None = None
+    quality: str | None = None
+    profile_name: str | None = None

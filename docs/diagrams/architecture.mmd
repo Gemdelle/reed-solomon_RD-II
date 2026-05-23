@@ -1,39 +1,46 @@
 graph TB
-  subgraph cloud["☁️ Servidor Central — Plano de Control (cloud)"]
+  subgraph cloud["☁️ Servidor Central — Plano de Control"]
     direction LR
     PR["Peer Registry\nPOST /peers/register\nPOST /peers/{id}/heartbeat\nGET /peers/{id}"]
-    WS["WebSocket Push\nGET /peers/watch\n— broadcast en cada\nregistro / heartbeat"]
+    WS["WebSocket Push\nGET /peers/watch\nbroadcast en cada\nregistro / heartbeat"]
     MR["Métricas + Recomendador\nPOST /metrics/report\nGET /metrics/recommendation/{id}"]
+    DT["Device Tokens\nPOST /device-tokens\nDELETE /device-tokens/{id}"]
+    KC["Keycloak\nOIDC / SSO\npuerto 8081"]
+    RD[("Redis\npeers con TTL\nmétricas últimas 10")]
     PR --- WS
+    PR --> RD
+    MR --> RD
+    DT --> RD
+    PR -.->|"valida JWT"| KC
   end
 
   subgraph peerA["💻 Peer A — RockDove Desktop"]
     direction TB
     UIA["React UI\n(ConnectPage / Dashboard)"]
-    AgentA["Python Agent :8000\nRS engine · storage\nUDP :9001"]
+    AgentA["Python Agent :8000\nRS engine · storage SQLite\nUDP :9001"]
     UIA -->|"HTTP 127.0.0.1:8000"| AgentA
   end
 
   subgraph peerB["💻 Peer B — RockDove Desktop"]
     direction TB
     UIB["React UI"]
-    AgentB["Python Agent :8000\nRS engine · storage\nUDP :9001"]
+    AgentB["Python Agent :8000\nRS engine · storage SQLite\nUDP :9001"]
     UIB -->|"HTTP 127.0.0.1:8000"| AgentB
   end
 
   subgraph edge["🔧 Nodo Edge — Docker headless"]
-    AgentE["Python Agent\nUDP :9001\nsin interfaz web"]
+    AgentE["Python Agent\nUDP :9001\nDevice Token auth"]
   end
 
-  AgentA <-->|"HTTPS ① registro / heartbeat / peer lookup / métricas"| PR
-  AgentB <-->|"HTTPS ① registro / heartbeat / peer lookup / métricas"| PR
-  AgentE <-->|"HTTPS ① registro / heartbeat"| PR
+  AgentA <-->|"HTTPS — registro / heartbeat / peer lookup / métricas"| PR
+  AgentB <-->|"HTTPS — registro / heartbeat / peer lookup / métricas"| PR
+  AgentE <-->|"HTTPS — registro / heartbeat\n(Bearer: device token)"| PR
 
-  UIA <-.->|"WebSocket ② push en tiempo real\nquién está online y su dirección UDP"| WS
-  UIB <-.->|"WebSocket ②"| WS
+  UIA <-.->|"WebSocket — push en tiempo real"| WS
+  UIB <-.->|"WebSocket"| WS
 
-  AgentA <-->|"UDP ③ — bloques Reed-Solomon\n🔒 los datos NUNCA pasan por el servidor"| AgentB
-  AgentA -.->|"UDP ③"| AgentE
+  AgentA <-->|"UDP directo — bloques Reed-Solomon\n🔒 los archivos NUNCA pasan por el servidor"| AgentB
+  AgentA -.->|"UDP directo"| AgentE
 
   style cloud fill:#fff8e1,stroke:#f59e0b,color:#000
   style peerA fill:#eff6ff,stroke:#3b82f6,color:#000

@@ -1,7 +1,7 @@
 ---
 title: "RockDove — Sistema P2P con Reed-Solomon"
-subtitle: "Especificación Técnica y Arquitectura"
-author: "Redes de Datos II"
+subtitle: "Arquitectura, Algoritmo e Infraestructura"
+author: "Grupo 1 — Redes de Datos II"
 date: "2026"
 lang: es
 toc: true
@@ -15,253 +15,227 @@ fontsize: 11pt
 
 # Descripción del Sistema
 
-## ¿Qué es?
+## ¿Qué es RockDove?
 
-**RockDove** es una plataforma de transferencia de archivos entre pares (*peer-to-peer*) que utiliza el algoritmo de corrección de errores **Reed-Solomon** sobre **UDP** para garantizar la integridad de los datos incluso en redes con pérdida de paquetes.
+**RockDove** es una plataforma de transferencia de archivos entre pares (*peer-to-peer*) que aplica
+el algoritmo de corrección de errores **Reed-Solomon** sobre **UDP** para garantizar la integridad
+de los datos incluso en redes con pérdida de paquetes. La redundancia matemática se calcula de
+forma adaptativa según las condiciones de red medidas en tiempo real, sin necesidad de que el
+usuario configure parámetros técnicos manualmente.
 
-El sistema está pensado para dos escenarios principales:
+El sistema está pensado para dos escenarios complementarios:
 
-- **Transferencia entre usuarios:** dos o más usuarios pueden enviarse archivos directamente entre sus máquinas, con garantía de integridad aunque se pierdan paquetes en el camino.
-- **Ingesta a dispositivos edge:** envío de datos desde una máquina remota hacia un nodo con conectividad degradada (celular, satelital, IoT), donde la retransmisión es costosa o imposible.
+- **Transferencia entre usuarios de escritorio:** dos o más usuarios de la misma organización se
+  envían archivos directamente entre máquinas, con verificación criptográfica de integridad.
+- **Ingesta a dispositivos edge / IoT:** un nodo con conectividad degradada (celular, satelital,
+  industrial) recibe datos con garantía de reconstrucción aunque se pierdan paquetes, sin
+  retransmisión.
 
-## ¿Qué problema resuelve?
+## El problema que resuelve
 
-UDP no garantiza entrega ni orden de paquetes. En redes inestables, una transferencia sin protección resulta en datos corruptos o incompletos. Las alternativas clásicas son:
+UDP no garantiza entrega ni orden. En redes inestables, una transferencia sin protección resulta en
+datos incompletos o corruptos. Las alternativas clásicas son:
 
-- **TCP:** garantiza entrega pero requiere retransmisión, costosa en links de alta latencia o intermitentes.
-- **Ignorar la pérdida:** simple pero inaceptable para archivos.
+| Alternativa | Problema |
+|---|---|
+| TCP | Retransmisión costosa en links de alta latencia o intermitentes |
+| Ignorar la pérdida | Inaceptable para archivos completos |
+| Checksum + retry | Requiere round-trips, imposible en links unidireccionales |
 
-Este sistema aplica **corrección de errores hacia adelante** (*Forward Error Correction*, FEC) mediante Reed-Solomon: el emisor agrega redundancia matemática al dato antes de enviarlo. El receptor puede reconstruir el original aunque lleguen menos paquetes de los enviados, **sin necesidad de retransmisión**.
+RockDove aplica **Forward Error Correction (FEC)** mediante Reed-Solomon: el emisor agrega
+redundancia antes de enviar. El receptor reconstruye el original aunque lleguen menos paquetes de
+los enviados, **sin contactar al emisor**.
 
 ## Casos de uso
 
-| Caso | Descripción |
-|------|-------------|
-| Transferencia intra-org | Usuario A envía un archivo a Usuario B dentro de la misma organización |
-| Transferencia a edge | Operador envía configuración a un nodo remoto con link degradado |
-| Verificación de integridad | Sistema reporta si el archivo llegó íntegro (`ok`), con errores recuperados (`degraded`) o irrecuperable (`failed`) |
+| Caso | Escenario típico |
+|---|---|
+| Transferencia intra-organización | Usuario A envía reporte a colega B |
+| Ingesta a nodo edge | Servidor central envía configuración a planta remota |
+| Verificación forense | Sistema certifica si el archivo llegó íntegro (`ok`), con recuperación RS (`degraded`) o irrecuperable (`failed`) |
+| Dispositivos headless | Sensores o cámaras reciben archivos sin interfaz gráfica, autenticados con token de dispositivo |
 
 \newpage
 
 # Algoritmo Reed-Solomon
 
-## ¿Qué hace?
+## Fundamento matemático
 
-Reed-Solomon opera sobre bloques de datos. Dado un bloque de **k** símbolos originales, el codificador produce **n** símbolos totales (k originales + n−k de paridad). El receptor puede reconstruir los k originales a partir de **cualquier combinación de k de los n símbolos**, aunque los n−k restantes se hayan perdido.
+Reed-Solomon es un código corrector de errores que opera sobre **GF(2^8^)** (campo de Galois de
+256 elementos). Cada símbolo del código es un byte. El codificador toma **k** bytes originales y
+produce **n** bytes totales: los k originales más **n − k** bytes de paridad generados
+algebraicamente.
 
-Cada símbolo es un byte. El campo matemático utilizado es **GF(2^8^)** (campo de Galois de 256 elementos), estándar para RS en sistemas digitales.
+La propiedad fundamental: el receptor puede reconstruir los k bytes originales a partir de
+**cualquier combinación de k de los n bytes recibidos**, sin importar cuáles k−n se perdieron.
+En el contexto UDP, donde se conoce exactamente qué paquetes llegaron (*erasure model*), esta
+capacidad se aprovecha al máximo: cada paquete perdido equivale a una posición de erasure conocida.
 
 ## Parámetros RS(n, k)
 
 | Símbolo | Significado |
-|---------|-------------|
-| `k` | Bytes originales por bloque |
-| `n` | Bytes totales después de codificar (k + paridad) |
-| `n − k` | Bytes de paridad (redundancia) |
-| `r = (n−k)/n` | Ratio de redundancia |
+|---|---|
+| `k` | Bytes de datos originales por bloque |
+| `n` | Bytes totales tras codificar (k + paridad); máximo 255 en GF(2^8^) |
+| `n − k` | Bytes de paridad (capacidad de corrección) |
+| `r = (n−k)/n` | Ratio de redundancia — controla cuánta pérdida se tolera |
 
-**Capacidad de recuperación:** en UDP se sabe exactamente qué paquetes llegaron (erasures). RS puede recuperar hasta `n − k` pérdidas por bloque, equivalente a tolerar un `r × 100%` de pérdida de paquetes.
+**Capacidad de corrección en modo erasure:** si `r = 0.30`, el sistema tolera hasta un 30% de
+paquetes perdidos por bloque y los reconstruye sin errores.
 
-## Relación entre el slider y los parámetros RS
+## Del slider al parámetro RS
 
-El usuario configura la redundancia mediante un valor `r ∈ [0.05, 0.50]`. El sistema deriva los parámetros automáticamente:
+El usuario selecciona un nivel de redundancia `r ∈ [0.05, 0.50]`. El sistema determina
+automáticamente los parámetros:
 
 ```
-n = 32  (tamaño de bloque fijo)
+n = 32   (tamaño de bloque estándar)
 k = round(n × (1 − r))
-k = clamp(k, 4, n−1)
+k = clamp(k, mín=4, máx=n−1)
 ```
 
-| Preset | r | n | k | Paridad | Overhead | Tolera pérdida |
-|--------|---|---|---|---------|----------|----------------|
+| Preset | r | n | k | Paridad | Overhead | Pérdida tolerable |
+|---|---|---|---|---|---|---|
 | Rápido | 0.10 | 32 | 29 | 3 | 10% | 10% |
 | Balanceado | 0.25 | 32 | 24 | 8 | 33% | 25% |
 | Resiliente | 0.50 | 32 | 16 | 16 | 100% | 50% |
 
-## Flujo del algoritmo
+El valor de `r` puede ser fijado manualmente por el usuario o determinado automáticamente por
+el sistema de redundancia adaptativa (ver sección 5).
 
-El siguiente diagrama ilustra el ciclo completo: codificación en el emisor, transmisión UDP con posible pérdida, decodificación en el receptor y verificación de integridad.
+## Flujo de codificación y decodificación
+
+El archivo se divide en bloques de `k` bytes. Cada bloque se codifica con RS para obtener `n`
+bytes (incluida la paridad). Cada bloque codificado se envía como un datagrama UDP. En el
+receptor, los bloques que llegan se decodifican con RS; los que faltan se marcan como erasures
+y se reconstruyen algebraicamente.
 
 ![Flujo del algoritmo Reed-Solomon](img/rs_algorithm.png)
+
+## Verificación de integridad
+
+El emisor calcula el **SHA-256** del archivo original antes de codificarlo y lo envía junto con la
+solicitud de transferencia. El receptor verifica el checksum sobre los bytes reconstruidos:
+
+| Resultado | Condición |
+|---|---|
+| `ok` | Todos los bloques llegaron, SHA-256 coincide |
+| `degraded` | Pérdidas recuperadas por RS, SHA-256 coincide — el archivo es íntegro |
+| `failed` | Pérdidas superan la capacidad RS, o SHA-256 no coincide |
 
 \newpage
 
 # Arquitectura del Sistema
 
-## Modelo de deployment: plano de control vs. plano de datos
+## Plano de control vs. plano de datos
 
-**Este es el punto central del diseño.**
+El diseño central de RockDove separa la coordinación de la transferencia en dos planos
+completamente independientes:
 
-El sistema se divide en dos planos completamente independientes:
-
-**Plano de control — servidor central (una sola instancia en cloud):**
-gestiona identidad, registro de peers y telemetría. **Nunca toca datos de archivos ni está en el camino de las transferencias.**
+**Plano de control — servidor central (una instancia en cloud):**
+gestiona identidad, presencia de peers y telemetría de red. **Nunca toca archivos ni interviene
+en la transferencia.**
 
 **Plano de datos — agente por máquina:**
-cada participante corre un agente local que realiza el RS encoding/decoding, maneja el socket UDP y almacena archivos en el filesystem local.
+cada participante corre un agente local que realiza RS encoding/decoding, maneja el socket UDP
+y almacena archivos en el filesystem local.
+
+El dato transferido **nunca pasa por el servidor**. El servidor solo responde a dos preguntas:
+*"¿dónde está el peer B?"* y *"¿qué redundancia conviene según la red actual?"*
+La transferencia es directa, máquina a máquina, sobre UDP.
 
 ```
-Cloud (una instancia):   servidor RockDove — coordinación + métricas
-Cada máquina:            agente Python + UI Electron (o Docker headless)
+Una instancia cloud:    Servidor RockDove — coordinación + métricas
+Cada máquina de usuario: Agente Python + interfaz Electron
+Dispositivos IoT/edge:   Agente Python headless en Docker
 ```
-
-El dato transferido **nunca pasa por el servidor**. El servidor solo responde: *"¿dónde está el peer B?"* y *"¿qué redundancia te conviene según la red actual?"*. La transferencia es directa, máquina a máquina, sobre UDP.
-
-![Diagrama de arquitectura del sistema](img/architecture.png)
 
 ## Analogía: servidor de coordinación estilo Tailscale
 
-El patrón arquitectónico es idéntico al que usan herramientas como **Tailscale** o **Syncthing**:
+El patrón es idéntico al de herramientas como **Tailscale** o **Syncthing**:
 
 | Componente | Tailscale | RockDove |
-|------------|-----------|----------|
+|---|---|---|
 | Servidor de coordinación | `login.tailscale.com` | Servidor central (cloud) |
-| Dato que ve el servidor | Claves públicas, IPs | Peer IDs, IPs UDP, métricas |
-| Dato que NO ve el servidor | Tráfico de red | Archivos transferidos |
+| Lo que ve el servidor | Claves públicas, IPs | Peer IDs, IPs UDP, métricas de red |
+| Lo que NO ve el servidor | Tráfico de red | Archivos transferidos |
 | Comunicación entre peers | WireGuard directo | UDP + Reed-Solomon directo |
-| Descubrimiento | DERP / coord server | `/peers/register` + WS push |
+| Descubrimiento de peers | DERP / coordination server | `/peers/register` + WebSocket push |
 
-En Tailscale, el coordination server permite que dos dispositivos en redes distintas se encuentren y establezcan un túnel directo. En RockDove, el servidor central permite que dos peers se encuentren y luego se transfieran archivos **directamente por UDP** sin intermediarios.
+En Tailscale el coordination server permite que dos dispositivos en redes distintas establezcan
+un túnel directo. En RockDove, el servidor central permite que dos peers se encuentren y luego
+transfieran archivos **directamente por UDP** sin intermediarios.
+
+## Diagrama de infraestructura
+
+![Diagrama de arquitectura del sistema](img/architecture.png)
+
+El diagrama muestra tres tipos de participantes: peers desktop (Electron + agente Python),
+nodos edge headless (Docker), y el servidor central con sus servicios internos (Redis, Keycloak).
+Las flechas continuas representan comunicación HTTPS con el servidor; la flecha gruesa entre peers
+representa la transferencia UDP directa de bloques Reed-Solomon.
 
 \newpage
 
-# Coordinación P2P y Autodescubrimiento
+# Servidor de Rendezvous
 
-## El problema del descubrimiento en P2P
+El servidor central actúa como **punto de encuentro** (*rendezvous server*): permite que los peers
+se encuentren en la red sin conocerse de antemano, y recoge telemetría para alimentar el sistema
+de redundancia adaptativa. Está implementado en **Python 3.12 + FastAPI**, expone el puerto 8080,
+y persiste todo su estado en **Redis**.
 
-En una red P2P pura, cada peer necesita saber la dirección IP y puerto de los demás antes de poder comunicarse. Sin un punto de encuentro, esto requiere flooding, multicast o configuración manual — todos con limitaciones en redes reales (NAT, firewalls, redes distintas).
-
-RockDove resuelve esto con un **servidor de rendezvous** (punto de encuentro) centralizado: cada peer anuncia su presencia y dirección UDP al servidor, y puede consultar la dirección de cualquier otro peer registrado.
-
-## Registro y presencia
+## Registro de peers y presencia
 
 Cuando un agente arranca:
 
-1. Llama a `POST /peers/register` con su `{peer_id, udp_host, udp_port, api_url}`.
-2. El servidor almacena el registro y lo marca como **online**.
-3. El servidor **transmite inmediatamente** la lista actualizada a todos los observadores WebSocket.
-4. El agente inicia un **loop de heartbeat** cada 15 segundos (`POST /peers/{id}/heartbeat`).
-5. Un peer sin heartbeat por más de 30 segundos se marca **offline** automáticamente.
+1. Llama a `POST /peers/register` con `{peer_id, udp_host, udp_port, api_url, network_hint}`.
+2. El servidor almacena el registro como un **hash en Redis** con TTL = 30 segundos.
+3. El servidor transmite inmediatamente el snapshot actualizado a todos los observadores WebSocket.
+4. El agente inicia un **heartbeat loop** cada 15 segundos (`POST /peers/{id}/heartbeat`).
+5. El heartbeat renueva el TTL del hash. Si el peer deja de latir, Redis expira la clave
+   automáticamente y la próxima broadcast lo omite.
+
+Si el servidor se reinicia, Redis recupera todos los peers registrados (el estado persiste).
+Si un peer reinicia, detecta el 404 en el próximo heartbeat y se re-registra automáticamente.
 
 ## Autodescubrimiento en tiempo real: WebSocket push
 
-La UI React se conecta al endpoint `GET /peers/watch` del servidor mediante WebSocket. Esto permite que el dashboard refleje el estado de la red **sin polling**:
+La UI React se conecta a `GET /peers/watch` mediante WebSocket permanente. El servidor hace
+broadcast de la lista completa cada vez que hay un cambio (registro, heartbeat, expiración).
+Esto significa que cuando un colega abre RockDove en otra máquina, aparece en el dashboard en
+menos de un segundo, sin polling.
 
-| Evento | Lo que hace el servidor |
-|--------|------------------------|
-| Nuevo peer se registra | broadcast lista completa a todos los watchers |
+| Evento | Acción del servidor |
+|---|---|
+| Nuevo peer se registra | broadcast snapshot completo |
 | Heartbeat recibido | broadcast (actualiza `last_seen`) |
-| Peer desaparece (timeout) | broadcast (marca offline) |
-| UI se conecta por primera vez | envía snapshot inmediato del estado actual |
-
-Esto significa que cuando un colega abre RockDove en otra máquina, aparece automáticamente en tu dashboard en menos de un segundo, sin que tengas que hacer nada.
-
-![Flujo de coordinación y autodescubrimiento](img/peer_discovery.png)
+| Peer expira por timeout | broadcast (el peer desaparece de la lista) |
+| UI se conecta por primera vez | envía snapshot inmediato |
 
 ## Resolución de dirección para transferencia
 
-Cuando el agente A quiere enviar un archivo al peer B:
+Cuando el agente A quiere transferir a B:
 
 1. Consulta **una sola vez** al servidor: `GET /peers/B`
 2. El servidor responde con `{udp_host, udp_port}` — la dirección donde B escucha UDP.
-3. A partir de ese momento, A envía los bloques RS **directamente** al socket UDP de B.
-4. El servidor no interviene en el resto de la transferencia.
+3. A partir de ahí, A envía los bloques RS **directamente** al socket UDP de B.
+4. El servidor no interviene en el resto.
 
-```
-A ──► GET /peers/B ──► Servidor
-      {udp_host, udp_port} ◄──
+![Flujo de coordinación y autodescubrimiento](img/peer_discovery.png)
 
-A ════════════════════════════► B   (UDP directo, sin pasar por servidor)
-     bloques Reed-Solomon
-```
+## Persistencia con Redis
 
-## Consideraciones de NAT y red
+Todos los datos del servidor se almacenan en **Redis**:
 
-Para que el descubrimiento funcione en redes reales:
+| Dato | Clave Redis | Estructura | TTL |
+|---|---|---|---|
+| Peer registrado | `peer:{org}:{id}` | Hash | 30 s (heartbeat) |
+| Métricas por peer | `metrics:{peer_id}` | List (últimas 10) | Sin expiración |
+| Device token | `device_token:{valor}` | Hash | Según configuración |
+| Scopes de grupo | `scope:{org_id}` | String JSON | Sin expiración |
 
-- El **puerto UDP 9001 debe ser accesible** desde el exterior (o desde los otros peers). Si hay NAT, se necesita port forwarding o que ambos peers estén en la misma red.
-- La variable `AGENT_API_URL` debe contener la **IP pública o accesible** del host, no `127.0.0.1`. Es la dirección que se registra en el servidor y que otros peers usarán para contactar.
-- El servidor central solo necesita el **puerto 8080 TCP** abierto. No necesita acceso UDP.
-
-> **Trabajo futuro:** implementar NAT traversal mediante UDP hole punching (técnica usada por WebRTC). El servidor actuaría como signaling server para coordinar el hole punching y permitir comunicación P2P incluso detrás de NAT estricto.
-
-\newpage
-
-# Flujo de Interacción del Usuario
-
-El siguiente diagrama de secuencia muestra las tres operaciones principales: arranque con registro, subida de archivo al almacenamiento local, y transferencia P2P con redundancia adaptativa.
-
-![Flujo de interacción del usuario](img/user_flow.png)
-
-## Estados de resultado de una transferencia
-
-| Estado | Condición |
-|--------|-----------|
-| `ok` | Todos los bloques llegaron, SHA-256 coincide |
-| `degraded` | Pérdidas recuperadas por RS, SHA-256 coincide |
-| `failed` | Pérdidas superan capacidad RS, o SHA-256 no coincide |
-
-\newpage
-
-# Componentes del Sistema
-
-## Servidor Central (`server/`)
-
-| Atributo | Valor |
-|----------|-------|
-| Tecnología | Python 3.12 + FastAPI |
-| Puerto | 8080 TCP |
-| Deploy | Docker Compose, instancia única compartida |
-
-El servidor expone tres responsabilidades:
-
-**Registro de peers (`/peers`):** almacena `{peer_id, udp_host, udp_port, last_seen}`. Provee el endpoint WebSocket `/peers/watch` para push en tiempo real.
-
-**Métricas y recomendador (`/metrics`):** recibe reportes de RTT, jitter y pérdida. Promedia las últimas 10 muestras y calcula un `redundancy_level` recomendado.
-
-**Configuración de autenticación (`/auth/config`):** informa a la UI si OIDC está habilitado. Permite futura integración con Keycloak sin cambios en el cliente.
-
-## Agente (`client/agent/`)
-
-| Atributo | Valor |
-|----------|-------|
-| Tecnología | Python 3.12 + FastAPI |
-| Puerto HTTP | 8000 |
-| Puerto UDP | 9001 |
-| Deploy | Electron (desktop) o Docker headless (IoT/edge) |
-
-El agente es el peer UDP real. Mantiene el socket UDP abierto, codifica y decodifica bloques RS, y envía/recibe datagramas directamente.
-
-| Módulo | Responsabilidad |
-|--------|----------------|
-| `rs/encoder.py` | RS encode, segmentación columnar, construcción de paquetes UDP |
-| `rs/decoder.py` | RS decode con erasure positions, verificación SHA-256 |
-| `rs/transport.py` | Socket UDP, envío/recepción de datagramas |
-| `storage/store.py` | Almacenamiento local de archivos con checksum |
-| `server_client.py` | Toda la comunicación HTTP con el servidor central |
-| `transfers/router.py` | Endpoints `/transfers/*` |
-
-## Shell Electron (`client/electron/`)
-
-El proceso principal de Electron:
-
-1. Spawna el agente Python como proceso hijo (`127.0.0.1:8000`), o en producción ejecuta el binario congelado con PyInstaller.
-2. Espera a que `/health` responda antes de abrir la ventana (polling, máximo 20 segundos).
-3. Carga la UI React desde los recursos embebidos (`extraResources` de electron-builder).
-4. Expone `window.rsAgent.baseUrl` al renderer via `contextBridge`.
-
-## Nodo Edge / IoT
-
-Para dispositivos con recursos limitados (Raspberry Pi, nodos industriales). El agente corre en Docker sin interfaz web, configurado puramente por variables de entorno.
-
-```bash
-docker run \
-  -e PEER_ID=edge-01 \
-  -e SERVER_URL=http://servidor:8080 \
-  -e AGENT_API_URL=http://192.168.1.50:8000 \
-  -p 8000:8000 -p 9001:9001/udp \
-  rs-agent
-```
+Esta arquitectura garantiza que un reinicio del servidor no pierde datos: los peers re-registran
+en el próximo heartbeat; las métricas acumuladas y los device tokens persisten.
 
 \newpage
 
@@ -269,104 +243,344 @@ docker run \
 
 ## Motivación
 
-Un nivel de redundancia demasiado bajo en una red inestable produce transferencias fallidas. Un nivel demasiado alto en una red estable desperdicia ancho de banda. El sistema mide condiciones de red en tiempo real y ajusta el valor por defecto del slider automáticamente.
+Un nivel de redundancia fijo ignora las condiciones reales de la red. Demasiado bajo en un link
+degradado produce transferencias fallidas. Demasiado alto en una LAN desperdicia ancho de banda.
+El sistema mide condiciones de red continuamente y ajusta el default del slider en cada
+transferencia.
 
-## Flujo de recomendación
+## Ciclo de medición y recomendación
+
+Dos fuentes de datos alimentan el sistema:
+
+**Sonda RTT en background:** el agente ejecuta un loop cada 60 segundos que mide la latencia HTTP
+hacia cada peer online (5 pings, promedio + jitter). Los resultados se reportan al servidor vía
+`POST /metrics/report`.
+
+**Métricas de transferencia:** al finalizar cada envío, el agente calcula la tasa de pérdida real
+(`recovered_blocks / total_blocks`) y el tiempo total de transmisión, y los reporta al servidor.
+
+El servidor mantiene las **últimas 10 muestras** por peer en Redis. Al recibir una solicitud de
+recomendación, promedia esas muestras y aplica la tabla de calidad:
 
 ![Sistema de redundancia adaptativa](img/adaptive_redundancy.png)
 
-## Tabla de calidad → redundancia
+## Tabla de calidad de red
 
 | Calidad | Pérdida | RTT | Jitter | Redundancia sugerida |
-|---------|---------|-----|--------|----------------------|
+|---|---|---|---|---|
 | Excellent | < 1% | < 50 ms | < 5 ms | 5% |
 | Good | < 5% | < 150 ms | < 20 ms | 10% |
 | Fair | < 15% | < 500 ms | < 80 ms | 25% |
 | Poor | < 30% | < 1000 ms | < 200 ms | 40% |
 | Critical | cualquier peor | — | — | 50% |
 
+## Recomendación dual: emisor y receptor
+
+Antes de cada transferencia, el agente emisor consulta la recomendación para **ambos extremos**
+del enlace en paralelo:
+
+```
+rec_emisor  = GET /metrics/recommendation/{mi_peer_id}
+rec_receptor = GET /metrics/recommendation/{target_peer_id}
+
+redundancia_efectiva = max(rec_emisor, rec_receptor)
+```
+
+Si cualquiera de los dos extremos tiene condiciones de red degradadas, la redundancia se eleva
+para proteger la transferencia. El resultado (nivel efectivo, calidad y perfil de red) se incluye
+en la respuesta de la transferencia para que la UI lo muestre al usuario.
+
 ## Comportamiento en la UI
 
-Al abrir el diálogo de transferencia, el agente consulta `GET /metrics/recommendation/{peer_id}` y precarga el slider con el valor recomendado. El usuario puede sobreescribir el valor manualmente y restablecer la recomendación con un botón. Si el servidor no está disponible, el agente usa **25%** como fallback conservador.
+Al abrir el diálogo de transferencia, el agente consulta la recomendación y precarga el slider con
+el valor sugerido. El usuario puede ajustar manualmente. Si no hay datos de métricas acumulados
+aún (primer uso), el sistema usa **0.25 (25%)** como fallback conservador.
+
+\newpage
+
+# Autenticación y Control de Acceso
+
+El sistema soporta tres modalidades de autenticación que pueden coexistir en el mismo despliegue:
+
+## Modo desarrollo (sin OIDC)
+
+Cuando `OIDC_ENABLED=false`, cualquier peer puede registrarse sin credenciales. Todos los peers
+quedan en la misma organización (`dev`) y se ven entre sí. Apropiado para desarrollo local y
+pruebas de concepto.
+
+## Autenticación OIDC con Keycloak (usuarios humanos)
+
+En producción, el sistema integra con **Keycloak** como proveedor de identidad OpenID Connect.
+El flujo utiliza PKCE (*Proof Key for Code Exchange*), que permite autenticación segura desde
+una aplicación de escritorio:
+
+1. El usuario hace clic en "Iniciar sesión" en la UI.
+2. La app genera la URL de autorización con PKCE y la abre en el **browser del sistema**.
+3. El usuario se autentica en Keycloak. El browser redirige a `http://127.0.0.1:8000/auth/callback`.
+4. El agente local recibe el código de autorización.
+5. La UI completa el intercambio código → JWT via `signinCallback()`.
+6. La UI entrega el JWT al agente (`POST /auth/token`). El agente lo usa para re-registrarse.
+
+El **JWT de Keycloak** contiene `sub` (→ peer_id), `iss` (→ org_id derivado del realm), y
+`groups` (→ grupos del usuario). La aislación multi-tenant se implementa por realm: peers de
+distintas organizaciones no se ven entre sí aunque compartan el mismo servidor central.
+
+## Device tokens para agentes headless
+
+Para dispositivos IoT y nodos edge que no tienen usuario interactivo, el sistema provee
+**device tokens**: credenciales autogeneradas por el servidor, únicas por dispositivo,
+almacenadas en Redis y revocables en cualquier momento desde el panel de administración.
+
+### Formato del token
+
+```
+rd_<43 caracteres Base64URL>   (256 bits de entropía)
+```
+
+El valor es generado por el servidor con `secrets.token_urlsafe(32)`. El prefijo `rd_` permite
+identificarlo visualmente. El valor completo solo se muestra una vez, en el momento de creación.
+
+### Ciclo de vida
+
+| Estado | Cómo ocurre |
+|---|---|
+| Activo | Inmediatamente después de la creación |
+| Expirado | Automáticamente cuando Redis expira las claves (TTL configurado en días) |
+| Revocado | Admin llama `DELETE /device-tokens/{id}` — efecto inmediato |
+
+Los tokens pueden ser **temporales** (con TTL en días) o **indefinidos** (sin expiración). Redis
+expira automáticamente los tokens temporales sin necesidad de tareas programadas.
+
+### Flujo de autenticación de un dispositivo headless
+
+![Flujo de autenticación OIDC y device tokens](img/auth_flow.png)
+
+El administrador crea el token desde el panel, lo comunica al operador del dispositivo, y el
+operador lo configura como variable de entorno. A partir de ahí, el agente headless se registra
+y mantiene su heartbeat usando el token como Bearer en cada request.
+
+## Gestión de grupos y scopes
+
+El sistema implementa aislación a dos niveles dentro de una organización:
+
+**Nivel 1 — org_id:** derivado del realm de Keycloak. Los peers de distintos realms son
+completamente invisibles entre sí.
+
+**Nivel 2 — grupos:** dentro de una misma org, el administrador configura qué grupos pueden
+verse entre sí. El centinela `__all__` otorga visibilidad sobre toda la org (para usuarios admin).
+
+\newpage
+
+# Flujos de Usuario
+
+## Flujo principal: arranque, carga y transferencia
+
+El siguiente diagrama muestra las tres operaciones centrales: registro del peer al arrancar la
+app, subida de un archivo al almacenamiento local del agente, y transferencia P2P con redundancia
+adaptativa.
+
+![Flujo de interacción del usuario](img/user_flow.png)
+
+## Historial de transferencias
+
+Cada transferencia (enviada o recibida) queda registrada en una base de datos **SQLite local**
+del agente (`transfers.db`). El historial persiste entre reinicios de la aplicación. La UI
+consume `GET /transfer/history?limit=50` para mostrar las transferencias pasadas con sus
+metadatos: peer destino, archivo, bytes, estado, redundancia efectiva, calidad de red y timestamp.
+
+## Flujo para nodo headless (IoT / edge)
+
+Un nodo edge corre el agente en Docker sin interfaz web. La transferencia puede iniciarse desde
+cualquier peer desktop que tenga al nodo edge en su lista. El nodo edge:
+
+1. Se registra con su device token al arrancar el contenedor.
+2. Mantiene heartbeat automático cada 15 segundos.
+3. Recibe transferencias UDP entrantes y las almacena localmente.
+4. Aparece como peer online en el dashboard de los usuarios desktop.
+
+No requiere ninguna interacción manual una vez desplegado.
+
+\newpage
+
+# Componentes del Sistema
+
+## Servidor Central
+
+| Atributo | Valor |
+|---|---|
+| Runtime | Python 3.12 + FastAPI |
+| Puerto | 8080 TCP |
+| Persistencia | Redis 7 |
+| Auth | Keycloak 24 (OIDC, opcional) |
+| Deploy | Docker Compose |
+
+**Módulos principales:**
+
+| Módulo | Responsabilidad |
+|---|---|
+| `peers/` | Registro, heartbeat, resolución de dirección, WebSocket push |
+| `metrics/` | Recolección de telemetría, cálculo de recomendaciones |
+| `device_tokens/` | Creación, listado y revocación de tokens por dispositivo |
+| `invites/` | Tokens de invitación de un solo uso para incorporación peer-a-peer |
+| `auth/` | Validación de JWT via JWKS de Keycloak, extracción de org_id y groups |
+
+## Agente Local
+
+| Atributo | Valor |
+|---|---|
+| Runtime | Python 3.12 + FastAPI |
+| Puerto HTTP | 8000 |
+| Puerto UDP | 9001 |
+| Almacenamiento | Filesystem local + SQLite |
+| Deploy | AppImage (desktop) o Docker (headless) |
+
+**Módulos principales:**
+
+| Módulo | Responsabilidad |
+|---|---|
+| `rs/encoder.py` | Segmentación en bloques, RS encode, construcción de datagramas UDP |
+| `rs/decoder.py` | Colección de bloques recibidos, RS decode con erasure positions, SHA-256 |
+| `rs/transport.py` | Socket UDP async — envío y recepción de datagramas |
+| `storage/store.py` | Almacenamiento local de archivos con checksum SHA-256 |
+| `storage/db.py` | Historial de transferencias en SQLite via aiosqlite |
+| `metrics/probe.py` | Sonda RTT/jitter en background cada 60 segundos |
+| `server_client.py` | Toda la comunicación HTTP con el servidor central |
+| `transfers/router.py` | Endpoints `/transfer/*` — envío, recepción, historial |
+
+## Interfaz Electron (Desktop)
+
+El proceso principal de Electron:
+
+1. Inicia el agente Python como proceso hijo y espera a que `/health` responda.
+2. Carga la React SPA desde los recursos embebidos del binario.
+3. Expone `window.rsAgent.baseUrl` al renderer via `contextBridge` (sin IPC para calls de API).
+
+La UI React (Vite + Tailwind CSS) se comunica exclusivamente con el agente local en
+`127.0.0.1:8000`. No hay llamadas directas al servidor central desde el frontend.
 
 \newpage
 
 # Infraestructura y Deployment
 
-## Servidor central
+## Servidor central (Docker Compose)
 
 ```bash
 cd server && docker compose up --build
-# accesible en :8080
 ```
 
-El servidor no tiene estado persistente en la implementación actual (registro y métricas en memoria). En producción se reemplazaría con Redis para heartbeats y PostgreSQL para historial de métricas.
+El compose incluye tres servicios:
 
-## Cliente desktop (RockDove)
+| Servicio | Imagen | Puerto |
+|---|---|---|
+| `server` | Build local (Python + FastAPI) | 8080 TCP |
+| `redis` | redis:7-alpine | 6379 TCP |
+| `keycloak` | keycloak:24 | 8081 TCP (opcional) |
+
+## Cliente desktop (AppImage / ejecutable)
 
 El cliente se distribuye como un ejecutable standalone generado con **electron-builder**:
 
 | Plataforma | Artefacto |
-|------------|-----------|
-| Linux | `.AppImage` |
-| Windows | instalador NSIS `.exe` |
+|---|---|
+| Linux | `.AppImage` (autocontenido) |
+| Windows | Instalador NSIS `.exe` |
 | macOS | `.dmg` |
 
-El binario incluye: shell Electron + UI React compilada + agente Python congelado con PyInstaller. **No requiere Python, Node ni ninguna dependencia instalada.**
-
-Para generar localmente:
+El artefacto incluye: shell Electron, React UI compilada, y agente Python congelado con
+**PyInstaller**. No requiere Python, Node ni ninguna dependencia preinstalada en el dispositivo
+del usuario final.
 
 ```bash
 cd client
-./scripts/build-agent.sh      # congela el agente Python con PyInstaller
-npm run dist:local             # empaqueta todo con electron-builder
-# → dist/app/RockDove-0.1.0.AppImage
+./scripts/build-agent.sh   # PyInstaller → agente congelado
+npm run dist:local          # electron-builder → AppImage
 ```
 
-Los releases en GitHub se generan automáticamente con GitHub Actions al pushear un tag `v*`.
+## Nodo headless (IoT / edge)
+
+Dos opciones de despliegue para dispositivos sin interfaz gráfica:
+
+**Docker Compose (recomendado):**
+
+```bash
+# .env del dispositivo (generado por el admin panel)
+PEER_ID=sensor-planta-a
+SERVER_URL=http://servidor:8080
+AGENT_API_URL=http://192.168.1.50:8000
+AGENT_SERVICE_TOKEN=rd_xK3mAb9dQpWnLcVt...
+
+docker compose -f docker-compose.headless.yml up -d
+```
+
+**Binario AppImage (sin Docker):**
+
+```bash
+PEER_ID=sensor-a \
+SERVER_URL=http://servidor:8080 \
+AGENT_SERVICE_TOKEN=rd_xK3m... \
+./rockdove-agent.AppImage
+```
+
+El agente headless se registra automáticamente al arrancar, mantiene heartbeat, y si el servidor
+se reinicia se vuelve a registrar en el próximo ciclo sin intervención humana.
 
 ## Variables de configuración del agente
 
 | Variable | Descripción | Default |
-|----------|-------------|---------|
+|---|---|---|
 | `SERVER_URL` | URL del servidor central | `http://localhost:8080` |
 | `PEER_ID` | Identificador único de este peer | `default-peer` |
-| `AGENT_API_URL` | URL HTTP pública de este agente | `http://localhost:8000` |
-| `UDP_HOST` | Bind address del socket UDP | `0.0.0.0` |
-| `UDP_PORT` | Puerto UDP | `9001` |
-| `STORAGE_PATH` | Ruta de almacenamiento local | `./data` |
-
-## Estructura del repositorio
-
-```
-.
-├── server/
-│   ├── src/
-│   │   ├── peers/         ← registro de peers + WebSocket push
-│   │   └── metrics/       ← telemetría + recomendador RS
-│   ├── Dockerfile
-│   └── docker-compose.yml
-│
-├── client/
-│   ├── agent/
-│   │   └── src/
-│   │       ├── rs/        ← encoder, decoder, transport UDP
-│   │       ├── storage/   ← almacenamiento local
-│   │       ├── transfers/ ← rutas /transfers/*
-│   │       └── server_client.py
-│   ├── electron/          ← shell Electron
-│   ├── ui/                ← React SPA (Vite + Tailwind)
-│   ├── build-resources/   ← ícono de la app
-│   └── scripts/           ← build-agent.sh (PyInstaller)
-│
-└── docs/
-    ├── diagrams/          ← fuentes Mermaid (versionadas)
-    └── informes/          ← output generado (gitignored)
-```
+| `AGENT_API_URL` | URL HTTP pública de este agente (registrada en el servidor) | autodetectada |
+| `UDP_PORT` | Puerto UDP para recibir bloques RS | `9001` |
+| `STORAGE_PATH` | Ruta de almacenamiento local | `~/.local/share/rockdove` |
+| `AGENT_SERVICE_TOKEN` | Device token autogenerado por el admin | vacío |
+| `NETWORK_HINT` | Perfil de red: `lan`, `wifi`, `cellular`, `satellite`, `auto` | `auto` |
 
 ## Consideraciones de red
 
-- El puerto **9001 UDP debe ser accesible** entre peers para recibir transferencias.
-- `AGENT_API_URL` debe apuntar a la **IP accesible por los otros peers** (no `127.0.0.1`). Si hay NAT, debe ser la IP pública o la IP dentro de la red compartida.
-- El servidor solo necesita **8080 TCP** abierto. No necesita acceso UDP.
-- Para redes con NAT estricto, se requiere port forwarding o VPN (por ejemplo Tailscale) para que los peers puedan alcanzarse directamente. El soporte de UDP hole punching es trabajo futuro.
+El puerto **9001 UDP debe ser accesible entre peers** para recibir transferencias. Si hay NAT,
+se necesita port forwarding o que ambos peers estén en la misma red (o VPN).
+
+La variable `AGENT_API_URL` debe apuntar a la **IP alcanzable por los otros peers**, no a
+`127.0.0.1`. Es la dirección que el servidor entrega a otros peers cuando la consultan.
+
+El servidor central solo requiere **8080 TCP** abierto. No necesita acceso UDP.
+
+\newpage
+
+# Stack Tecnológico
+
+| Capa | Tecnología | Versión | Rol |
+|---|---|---|---|
+| Servidor central | Python + FastAPI | 3.12 / 0.115 | API REST + WebSocket |
+| Persistencia servidor | Redis | 7 | Peers, métricas, device tokens |
+| Auth / SSO | Keycloak | 24 | OIDC, multi-tenant, PKCE |
+| Agente local | Python + FastAPI | 3.12 / 0.115 | RS engine, UDP, storage |
+| FEC | reedsolo | 1.7 | Reed-Solomon GF(2^8^) |
+| HTTP client (agente) | httpx | 0.28 | Llamadas async al servidor |
+| Historial transferencias | aiosqlite | 0.22 | SQLite async en el agente |
+| Shell desktop | Electron | 33 | Empaquetado + spawn del agente |
+| UI | React + Vite + Tailwind CSS | 18 / 5 / 3 | SPA cargada por Electron |
+| Empaquetado agente | PyInstaller | 6 | Congela Python en binario |
+| Empaquetado desktop | electron-builder | 25 | Genera AppImage / exe / dmg |
+| Gestión deps Python | uv | latest | Lockfile reproducible |
+| Contenedores | Docker + Compose | 27 | Servidor + nodos headless |
+
+## Librerías clave del servidor
+
+| Librería | Uso |
+|---|---|
+| `fastapi` | Framework HTTP + WebSocket + validación automática via Pydantic |
+| `redis[asyncio]` | Cliente Redis async para persistencia de peers y métricas |
+| `PyJWT[crypto]` | Validación de JWTs de Keycloak (RS256, JWKS fetch) |
+| `pydantic-settings` | Configuración via variables de entorno con tipos |
+
+## Librerías clave del agente
+
+| Librería | Uso |
+|---|---|
+| `reedsolo` | Implementación de Reed-Solomon en GF(2^8^) |
+| `httpx` | Cliente HTTP async para comunicación con el servidor |
+| `aiosqlite` | Historial persistente de transferencias en SQLite |
+| `pydantic-settings` | Configuración via `.env` o variables de entorno |
+| `uvicorn` | Servidor ASGI para la API local del agente |

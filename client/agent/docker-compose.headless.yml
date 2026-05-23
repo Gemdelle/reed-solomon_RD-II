@@ -1,0 +1,43 @@
+# Headless RockDove agent — IoT / edge deployment.
+#
+# Copy this file to the target device along with a .env file.
+# The agent registers with the central server on startup and keeps itself alive.
+#
+# ── Minimum .env (dev mode, no OIDC) ─────────────────────────────────────────
+#   PEER_ID=edge-01
+#   SERVER_URL=http://<server-ip>:8080
+#   AGENT_API_URL=http://<this-device-ip>:8000
+#
+# ── OIDC mode (admin-issued service token) ────────────────────────────────────
+#   PEER_ID=edge-01
+#   SERVER_URL=http://<server-ip>:8080
+#   AGENT_API_URL=http://<this-device-ip>:8000
+#   AGENT_SERVICE_TOKEN=<token from admin panel>
+#
+# ── First-time onboarding with invite token (optional) ────────────────────────
+#   Add INVITE_TOKEN=<single-use jwt from admin panel> for first registration.
+#   Remove it afterwards — AGENT_SERVICE_TOKEN handles re-registration.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  agent:
+    build: .                          # or: image: ghcr.io/your-org/rockdove-agent:latest
+    ports:
+      - "${AGENT_PORT:-8000}:8000"
+      - "${UDP_PORT:-9001}:9001/udp"
+    volumes:
+      - rockdove_data:/data
+    env_file: .env                    # PEER_ID, SERVER_URL, AGENT_API_URL, AGENT_SERVICE_TOKEN
+    environment:
+      UDP_PORT: "${UDP_PORT:-9001}"
+      STORAGE_PATH: /data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  rockdove_data:

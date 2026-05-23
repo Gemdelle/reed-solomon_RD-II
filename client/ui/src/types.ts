@@ -56,3 +56,21 @@ export interface AppConfig {
 export interface ScopeConfig {
   scopes: Record<string, string[]>;
 }
+
+export interface DeviceTokenCreate {
+  label: string;
+  peer_id?: string | null;
+  ttl_seconds?: number | null;
+}
+
+export interface DeviceTokenInfo {
+  id: string;
+  label: string;
+  peer_id: string | null;
+  org_id: string;
+  created_by: string;
+  created_at: string;
+  expires_at: string | null;
+  token_preview: string;
+  token?: string | null; // solo presente en la respuesta de creación
+}

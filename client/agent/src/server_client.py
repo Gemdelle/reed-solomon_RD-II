@@ -46,10 +46,11 @@ class ServerClient:
 
     async def heartbeat(self, peer_id: str) -> None:
         async with httpx.AsyncClient(timeout=5) as c:
-            await c.post(
+            r = await c.post(
                 f"{self._base}/peers/{peer_id}/heartbeat",
                 headers=self._auth_headers,
             )
+            r.raise_for_status()
 
     async def get_peers(self) -> list[dict]:
         async with httpx.AsyncClient(timeout=10) as c:
@@ -75,7 +76,8 @@ class ServerClient:
                 headers=self._auth_headers,
             )
 
-    async def get_recommendation(self, peer_id: str) -> float:
+    async def get_full_recommendation(self, peer_id: str) -> dict:
+        """Returns {redundancy_level, quality, profile_name, based_on_samples}."""
         try:
             async with httpx.AsyncClient(timeout=5) as c:
                 r = await c.get(
@@ -83,10 +85,19 @@ class ServerClient:
                     headers=self._auth_headers,
                 )
                 if r.status_code == 200:
-                    return r.json()["redundancy_level"]
+                    return r.json()
         except Exception:
             pass
-        return _DEFAULT_REDUNDANCY
+        return {
+            "redundancy_level": _DEFAULT_REDUNDANCY,
+            "quality": "unknown",
+            "profile_name": "unknown",
+            "based_on_samples": 0,
+        }
+
+    async def get_recommendation(self, peer_id: str) -> float:
+        rec = await self.get_full_recommendation(peer_id)
+        return rec["redundancy_level"]
 
 
 server_client = ServerClient()

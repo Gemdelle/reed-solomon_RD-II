@@ -10,8 +10,9 @@ from rs.encoder import encode_file
 from rs.models import TransferStatus
 from rs.transport import udp
 from server_client import server_client
+from storage.db import insert_transfer, list_history
 from storage.store import FileStorage
-from transfers.models import ReceiveRequest, SendRequest, TransferResult
+from transfers.models import HistoryEntry, ReceiveRequest, SendRequest, TransferResult
 
 router = APIRouter()
 
@@ -31,8 +32,21 @@ async def send_file(req: SendRequest) -> TransferResult:
         raise HTTPException(404, "File bytes not found")
 
     redundancy_level = req.redundancy_level
+    effective_quality: str | None = None
+    effective_profile: str | None = None
     if redundancy_level is None:
-        redundancy_level = await server_client.get_recommendation(settings.PEER_ID)
+        sender_rec, target_rec = await asyncio.gather(
+            server_client.get_full_recommendation(settings.PEER_ID),
+            server_client.get_full_recommendation(req.target_peer_id),
+        )
+        # Worst endpoint drives redundancy — if either side is degraded, protect the transfer
+        if target_rec["redundancy_level"] >= sender_rec["redundancy_level"]:
+            chosen = target_rec
+        else:
+            chosen = sender_rec
+        redundancy_level = chosen["redundancy_level"]
+        effective_quality = chosen.get("quality")
+        effective_profile = chosen.get("profile_name")
 
     try:
         peer = await server_client.get_peer(req.target_peer_id)
@@ -96,8 +110,29 @@ async def send_file(req: SendRequest) -> TransferResult:
             loss_rate=loss_rate,
         )
     )
+    asyncio.create_task(
+        insert_transfer(
+            transfer_id=transfer_id,
+            direction="sent",
+            peer_id=req.target_peer_id,
+            filename=meta.get("filename"),
+            bytes_=len(file_bytes),
+            status=str(result.status.value if hasattr(result.status, "value") else result.status),
+            redundancy=redundancy_level,
+            recovered_blocks=result.recovered_blocks,
+            total_blocks=result.total_blocks,
+            quality=effective_quality,
+            profile_name=effective_profile,
+        )
+    )
 
-    return result
+    base = result.model_dump(exclude={"effective_redundancy", "quality", "profile_name"})
+    return TransferResult(
+        **base,
+        effective_redundancy=redundancy_level,
+        quality=effective_quality,
+        profile_name=effective_profile,
+    )
 
 
 @router.post("/receive", status_code=202)
@@ -126,6 +161,18 @@ async def _process_incoming(req: ReceiveRequest) -> None:
         "file_id": file_id,
         "reason": result.reason,
     }
+    asyncio.create_task(
+        insert_transfer(
+            transfer_id=req.transfer_id,
+            direction="received",
+            peer_id=None,
+            filename=f"transfer_{req.transfer_id}",
+            bytes_=req.file_size,
+            status=str(result.status.value if hasattr(result.status, "value") else result.status),
+            recovered_blocks=result.recovered_blocks,
+            total_blocks=result.total_blocks,
+        )
+    )
 
 
 @router.get("/{transfer_id}/status", response_model=TransferResult)
@@ -133,6 +180,12 @@ async def get_status(transfer_id: str) -> TransferResult:
     if transfer_id not in _transfers:
         raise HTTPException(404, "Transfer not found")
     return TransferResult(**_transfers[transfer_id])
+
+
+@router.get("/history", response_model=list[HistoryEntry])
+async def get_history(limit: int = 50) -> list[HistoryEntry]:
+    rows = await list_history(limit=limit)
+    return [HistoryEntry(**r) for r in rows]
 
 
 @router.get("/", response_model=list[TransferResult])

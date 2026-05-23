@@ -1,6 +1,8 @@
 import asyncio
 from contextlib import asynccontextmanager
 
+import httpx
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -12,6 +14,7 @@ from metrics.probe import rtt_probe_loop
 from peers.router import router as peers_router
 from rs.transport import udp
 from server_client import server_client
+import storage.db as db
 import token_store
 from transfers.router import router as transfers_router
 
@@ -22,9 +25,23 @@ _auth_store: dict = {}
 async def _heartbeat_loop() -> None:
     while True:
         await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
+        settings = get_settings()
+        pid = token_store.get_peer_id() or settings.PEER_ID
         try:
-            pid = token_store.get_peer_id() or get_settings().PEER_ID
             await server_client.heartbeat(pid)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                # Peer TTL expired (e.g. server restart) — re-register silently.
+                try:
+                    result = await server_client.register(
+                        peer_id=settings.PEER_ID,
+                        api_url=settings.AGENT_API_URL,
+                        udp_host=settings.UDP_HOST,
+                        udp_port=settings.UDP_PORT,
+                    )
+                    token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -32,6 +49,7 @@ async def _heartbeat_loop() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    await db.init_db(settings.STORAGE_PATH)
     await udp.start(settings.UDP_HOST, settings.UDP_PORT)
     try:
         result = await server_client.register(
@@ -49,6 +67,7 @@ async def lifespan(app: FastAPI):
     heartbeat_task.cancel()
     probe_task.cancel()
     udp.stop()
+    await db.close_db()
 
 
 app = FastAPI(title="RS Transfer Agent", version="0.1.0", lifespan=lifespan)

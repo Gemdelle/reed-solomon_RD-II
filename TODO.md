@@ -5,12 +5,14 @@
 | Componente | Estado |
 |---|---|
 | Server: peer registry + WS push | ✅ funcional |
-| Server: metrics endpoint + recommender | ✅ existe, pero nadie lo alimenta |
+| Server: metrics endpoint + recommender | ✅ funcional — colecta latencia y sube redundancia |
 | Server: org/realm isolation (OIDC multi-realm) | ✅ funcional |
 | Server: group scopes (admin configurable) | ✅ funcional |
 | Server: invite tokens para agentes headless | ✅ funcional |
 | Agent: RS encoder/decoder + UDP | ✅ funcional |
-| Agent: heartbeat loop | ✅ funcional |
+| Agent: heartbeat loop + auto re-registro | ✅ re-registra si TTL vence (server restart) |
+| Headless agent Docker deploy | ✅ Dockerfile (uv) + docker-compose.headless.yml |
+| Device tokens per-dispositivo | ✅ autogenerados, revocables, temporales o indefinidos |
 | Agent: AppImage / distribución Electron | ✅ funcional (arreglado) |
 | Agent: storage path XDG-compliant | ✅ `~/.local/share/rockdove` |
 | Agent: JWT push desde UI después de login | ✅ funcional |
@@ -18,13 +20,13 @@
 | Admin panel (UI) | ✅ visibilidad de grupos + invites IoT |
 | OIDC / SSO en Electron | ✅ loopback flow con browser externo |
 | Peer invite tokens | ✅ funcional |
-| Agent: `report_metrics()` | ❌ definida, **nunca llamada** |
-| Agent: medición real de RTT/jitter/loss | ❌ no existe |
-| Persistencia en servidor | ❌ todo en dicts en memoria |
+| Agent: `report_metrics()` | ✅ llamada post-transfer (loss_rate) y en background RTT probe |
+| Agent: medición real de RTT/jitter/loss | ✅ `metrics/probe.py` — HTTP RTT a peers cada 60s |
+| Persistencia en servidor | ✅ Redis — peers con TTL, métricas con LPUSH/LTRIM |
 | Feature flags | ❌ no existe |
 | Dynamic FEC | ❌ estático por transferencia |
 | NAT traversal / relay | ❌ no existe |
-| Transfer history persistido | ❌ solo en React state |
+| Transfer history persistido | ✅ SQLite en agente (`storage/db.py`) + `GET /transfer/history` |
 
 ---
 
@@ -87,42 +89,21 @@ Fix: detección server-side. La UI ahora sondea `GET /peers/scopes`: respuesta 2
 
 ---
 
-## P0 — Gaps críticos (el sistema no es real sin esto)
+## ✅ P0.1 · Métricas reales — COMPLETADO
 
-### P0.1 · Métricas reales: instrumentar UDP y llamar `report_metrics()`
-**Por qué:** el sistema de redundancia adaptativa es el feature estrella del TP pero está ciego — el recommender funciona pero nunca recibe datos.
-
-**Dónde:** `client/agent/src/transfers/router.py` + nuevo `client/agent/src/metrics/probe.py`
-
-**Qué hacer:**
-- Al terminar cada transferencia, calcular desde los datos que ya existen: `loss_rate = recovered_blocks / total_blocks`, `elapsed_ms` del envío
-- Llamar `await server_client.report_metrics(peer_id, rtt_ms, jitter_ms, loss_rate)` al final de `send_file()`
-- Agregar un background task en `main.py` lifespan que cada 60s mide RTT real: abre UDP a cada peer online y envía 5 paquetes de 20 bytes tipo ping, mide round-trip
-
-**Complejidad:** M
+- `metrics/probe.py`: loop cada 60s, HTTP RTT (5 pings) a cada peer online, reporta a servidor
+- `transfers/router.py`: al terminar cada send, reporta `loss_rate = recovered_blocks / total_blocks` y `elapsed_ms`
+- `server_client.get_full_recommendation()`: fetch en paralelo para sender **y** target; usa `max` → si cualquier extremo tiene alta latencia, sube redundancia
+- `TransferResult` ahora incluye `effective_redundancy`, `quality`, `profile_name` para que la UI los muestre
 
 ---
 
-### P0.2 · Persistencia del servidor con Redis
-**Por qué:** si el servidor se reinicia, todos los peers se "olvidan". Inaceptable en producción.
+## ✅ P0.2 · Persistencia del servidor — COMPLETADO
 
-**Dónde:** `server/src/peers/router.py`, `server/src/metrics/collector.py`, `server/docker-compose.yml`
-
-**Qué hacer:**
-- Agregar `redis` a `server/pyproject.toml`
-- Reemplazar `_peers: dict` → Redis hash con TTL = heartbeat timeout
-- Heartbeat = `EXPIRE peer:{id} 30` en lugar de actualizar `last_seen` en memoria
-- `_reports` deque → Redis list con `LPUSH` / `LTRIM` (max 10 por peer)
-
-```yaml
-# server/docker-compose.yml
-services:
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
-```
-
-**Complejidad:** M
+- Peers en Redis hash `peer:{org_id}:{peer_id}` con TTL = `HEARTBEAT_TTL_S`
+- Heartbeat = `EXPIRE` del key, el peer desaparece solo si deja de latir
+- Métricas en Redis list `metrics:{peer_id}` con `LPUSH` + `LTRIM` (max 10 muestras)
+- Redis en `docker-compose.yml` como servicio propio
 
 ---
 
@@ -249,28 +230,109 @@ Agent lo lee al arrancar y guarda en un singleton `features`. Cada codepath que 
 
 ---
 
-### P2.2 · Persistencia de historial de transferencias
-**Por qué:** el historial vive solo en React state — si cerrás la app, se pierde.
+## ✅ P2.2 · Historial de transferencias SQLite — COMPLETADO
 
-**Dónde:** `client/agent/src/storage/` — agregar SQLite con `aiosqlite`
+- `storage/db.py` — init, insert, list con `aiosqlite`
+- Persiste sent (con `peer_id`, `filename`, `redundancy`, `quality`) y received (con `file_size`, `recovered_blocks`)
+- `GET /transfer/history?limit=50` — `HistoryEntry` model
+- Inicializado en el lifespan de `main.py`; se cierra ordenadamente al apagar el agente
 
-```sql
-CREATE TABLE transfers (
-    id TEXT PRIMARY KEY,
-    ts DATETIME,
-    target_peer TEXT,
-    filename TEXT,
-    bytes INTEGER,
-    status TEXT,        -- ok / degraded / failed
-    redundancy REAL,
-    recovered_blocks INTEGER,
-    total_blocks INTEGER
-);
+---
+
+## ✅ Headless Agent Deployment — COMPLETADO
+
+### Qué hay
+
+**`client/agent/Dockerfile`** — imagen funcional construida con `uv export` desde el lockfile para deps reproducibles.
+
+**`client/agent/docker-compose.headless.yml`** — compose listo para copiar al dispositivo. Lee variables desde `.env`.
+
+**Heartbeat auto-recovery** — si el peer TTL vence en Redis (server se reinicia), el siguiente heartbeat devuelve 404 y el agente se vuelve a registrar automáticamente sin intervención humana.
+
+### Device tokens — sistema de autenticación por dispositivo ✅
+
+Módulo `server/src/device_tokens/`. Reemplaza el token compartido por tokens únicos, autogenerados y revocables.
+
+**Formato:** `rd_<43-char base64url>` — 256 bits de entropía, imposible de adivinar.
+
+**API (admin only):**
+
+| Endpoint | Acción |
+|---|---|
+| `POST /device-tokens/` | Crea token. Retorna el valor completo **solo en esta respuesta** |
+| `GET /device-tokens/` | Lista tokens del org con `token_preview` (primeros 12 chars + `...`) |
+| `DELETE /device-tokens/{id}` | Revoca inmediatamente — el token falla en el próximo request |
+
+**Creación — campos:**
+```json
+{
+  "label": "Sensor Planta A",
+  "peer_id": "sensor-a1",
+  "ttl_seconds": 2592000
+}
+```
+`ttl_seconds: null` → indefinido. El token se borra de Redis al vencer (sin cron).
+
+**Storage Redis:**
+- `device_token:{value}` → hash con metadata (lookup de auth)
+- `device_token_rev:{org}:{id}` → value (para revocar por ID)
+- `device_tokens_idx:{org}` → set de IDs (para listar)
+
+**Auth flow en `deps.py`:**
+1. `AGENT_SERVICE_TOKEN` estático (legado, solo si está configurado)
+2. Redis lookup `device_token:{bearer}` → `CallerInfo(is_service=True, peer_id=<peer_id del token>)`
+3. OIDC JWT (usuarios humanos)
+
+### Flujo completo para un dispositivo headless
+
+**Paso 1 — Admin genera un device token**
+
+```http
+POST /device-tokens/
+Authorization: Bearer <admin-jwt>
+
+{ "label": "Sensor Planta A", "peer_id": "sensor-a1", "ttl_seconds": null }
+```
+Respuesta (el campo `token` solo aparece aquí):
+```json
+{
+  "id": "550e8400-...",
+  "label": "Sensor Planta A",
+  "token": "rd_dW6awd00XpaS1PqJzK8mBnLcVt9...",
+  "token_preview": "rd_dW6awd00Xp...",
+  "expires_at": null
+}
 ```
 
-API nueva: `GET /transfers/history?limit=50` — la UI la consume en lugar de mantener estado local.
+**Paso 2 — Operador configura el dispositivo**
 
-**Complejidad:** M
+`.env` en el dispositivo:
+```
+PEER_ID=sensor-a1
+SERVER_URL=http://my-server:8080
+AGENT_API_URL=http://<device-ip>:8000
+AGENT_SERVICE_TOKEN=rd_dW6awd00XpaS1PqJzK8mBnLcVt9...
+```
+```bash
+docker compose -f docker-compose.headless.yml up -d
+```
+
+**Paso 3 — El agente se auto-mantiene**
+
+- Se registra en el server al arrancar usando el device token como Bearer
+- Heartbeat cada 15s renueva el TTL Redis del peer
+- Si el server se reinicia → siguiente heartbeat (404) dispara re-registro automático
+- Si el token vence → heartbeat empieza a fallar 401 → admin genera uno nuevo
+
+### Binario alternativo (sin Docker)
+
+```bash
+chmod +x rockdove-agent.AppImage
+PEER_ID=sensor-a1 SERVER_URL=http://server:8080 \
+AGENT_API_URL=http://$(hostname -I | awk '{print $1}'):8000 \
+AGENT_SERVICE_TOKEN=rd_dW6awd00XpaS1... \
+./rockdove-agent.AppImage
+```
 
 ---
 

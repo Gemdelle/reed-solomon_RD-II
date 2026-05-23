@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
+from device_tokens.router import router as device_tokens_router
 from invites.router import router as invites_router
 from metrics.router import router as metrics_router
 from peers.router import router as peers_router
@@ -18,6 +19,7 @@ app.add_middleware(
 app.include_router(peers_router, prefix="/peers", tags=["peers"])
 app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
 app.include_router(invites_router, prefix="/invites", tags=["invites"])
+app.include_router(device_tokens_router, prefix="/device-tokens", tags=["device-tokens"])
 
 
 @app.get("/health", tags=["meta"])
