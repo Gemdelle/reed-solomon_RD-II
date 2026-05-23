@@ -63,6 +63,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
+    optimize=2,
 )
 coll = COLLECT(
     exe,

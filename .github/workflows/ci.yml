@@ -85,9 +85,9 @@ jobs:
 
       - name: Build binary
         working-directory: client/agent
-        # --optimize 2: strip docstrings and assert statements from every .pyc
-        # in the PYZ archive so source intent is not recoverable from the bundle.
-        run: uv run pyinstaller rs_agent.spec --distpath dist --noconfirm --optimize 2
+        # optimize=2 is set in EXE() inside rs_agent.spec (strips docstrings + asserts).
+        # --optimize is a makespec-only flag and cannot be used with an existing .spec file.
+        run: uv run pyinstaller rs_agent.spec --distpath dist --noconfirm
 
       - name: Smoke-test binary
         working-directory: client/agent

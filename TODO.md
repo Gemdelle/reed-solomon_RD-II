@@ -8,15 +8,42 @@
 | Server: metrics endpoint + recommender | ✅ existe, pero nadie lo alimenta |
 | Agent: RS encoder/decoder + UDP | ✅ funcional |
 | Agent: heartbeat loop | ✅ funcional |
+| Agent: AppImage / distribución Electron | ✅ funcional (arreglado) |
+| Agent: storage path XDG-compliant | ✅ `~/.local/share/rockdove` |
+| OIDC / SSO en Electron | ✅ loopback flow con browser externo |
 | Agent: `report_metrics()` | ❌ definida, **nunca llamada** |
 | Agent: medición real de RTT/jitter/loss | ❌ no existe |
 | Persistencia en servidor | ❌ todo en dicts en memoria |
-| OIDC | ❌ stub devuelve `false` |
 | Feature flags | ❌ no existe |
 | Dynamic FEC | ❌ estático por transferencia |
 | Peer invite tokens | ❌ no existe |
 | NAT traversal / relay | ❌ no existe |
 | Transfer history persistido | ❌ solo en React state |
+
+---
+
+## Fixes aplicados en esta sesión
+
+### ✅ AppImage: agente no arrancaba (`ModuleNotFoundError: No module named 'main'`)
+- `src/main.py` tenía `\"\"\"` (backslashes literales antes de triple-quotes) → syntax error → PyInstaller marcaba `main` como `invalid module` y no lo bundleaba
+- `src/__init__.py` convertía `src/` en un paquete Python, rompiendo la resolución de imports de PyInstaller con `pathex=["src"]`
+- `run.py` manipulaba `sys.path` innecesariamente en modo frozen (PyInstaller ya provee `FrozenImporter` en `sys.meta_path`)
+
+### ✅ AppImage: storage path read-only (`OSError: [Errno 30] Read-only file system: 'data'`)
+- `STORAGE_PATH` defaulteaba a `"./data"` (path relativo al CWD del AppImage montado)
+- Ahora resuelve a `$XDG_DATA_HOME/rockdove` o `~/.local/share/rockdove`
+
+### ✅ OIDC: SSO abría Keycloak dentro de Electron en lugar del browser del sistema
+- `startLogin()` usaba monkey-patching de `window.open` + `signinPopup()` — muy frágil
+- Ahora usa `_manager._client.createSigninRequest()` para generar la URL con PKCE, la abre via `shell.openExternal()`, y el loopback flow (`/auth/callback` → `/auth/poll`) completa el intercambio
+
+### ✅ UI: 307 redirects en cada request al agente
+- `agentApi` usaba `/files` y `/transfer` sin trailing slash → FastAPI redirigía a `/files/` y `/transfer/` en cada call
+- Arreglado en `api.ts`
+
+### ✅ UI: React StrictMode en build de producción
+- `StrictMode` en React 18 double-invoca effects en dev para detectar side effects → `useEffect` de `FileList` se ejecutaba 2 veces al montar, generando ráfagas de requests
+- Sacado de `main.tsx` para el AppImage
 
 ---
 
@@ -56,31 +83,6 @@ services:
 ```
 
 **Complejidad:** M
-
----
-
-### P0.3 · Auto-detección de `AGENT_API_URL`
-**Por qué:** ahora el usuario tiene que saber su IP y configurarla a mano. Con Electron, nadie va a hacer eso.
-
-**Dónde:** `client/agent/src/config.py`
-
-```python
-def _detect_local_ip() -> str:
-    import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.connect(("8.8.8.8", 80))
-        return s.getsockname()[0]
-
-class Settings(BaseSettings):
-    AGENT_API_URL: str = ""
-
-    def model_post_init(self, _):
-        if not self.AGENT_API_URL:
-            ip = _detect_local_ip()
-            self.AGENT_API_URL = f"http://{ip}:{self.AGENT_PORT}"
-```
-
-**Complejidad:** S
 
 ---
 
@@ -168,25 +170,17 @@ PROFILES = {
 
 ---
 
-### P1.4 · OIDC real con Keycloak
-**Por qué:** el TP menciona autenticación pero nunca funciona. Con Keycloak en docker-compose es una tarde de trabajo.
+### ✅ P1.4 · OIDC real con Keycloak — Electron side done
+El flujo SSO en Electron funciona end-to-end:
+- `startLogin()` genera la URL de autorización con PKCE y la abre en el browser del sistema
+- Keycloak redirige a `http://127.0.0.1:8000/auth/callback` (agente local)
+- El agente almacena el code; la UI hace polling y completa el token exchange con `signinCallback()`
 
-**Dónde:** `server/docker-compose.yml`, `server/src/main.py`, `client/ui/src/auth/oidc.ts` (ya implementado del lado UI)
+**Pendiente en server side:**
+- `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_ENABLED=true` en las env vars del servidor (ya están los campos en `/auth/config`)
+- Verificación del JWT en endpoints protegidos del servidor
 
-```yaml
-# server/docker-compose.yml
-keycloak:
-  image: quay.io/keycloak/keycloak:24
-  environment:
-    KCADMIN_USERNAME: admin
-    KCADMIN_PASSWORD: admin
-  command: start-dev
-  ports: ["8081:8080"]
-```
-
-Server settings: `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_ENABLED=true` → `/auth/config` ya devuelve esos campos, solo hay que alimentarlos desde env vars.
-
-**Complejidad:** M
+**Complejidad restante:** S
 
 ---
 
@@ -273,11 +267,11 @@ Tablas mínimas:
 ## Secuencia de sprints sugerida
 
 ```
-Sprint 1 (P0):   auto-IP · Redis en server · métricas desde transfers
+Sprint 1 (P0):   Redis en server · métricas desde transfers
 Sprint 2 (P1a):  dynamic FEC · network profiles
-Sprint 3 (P1b + P2.1): invite tokens · feature flags
-Sprint 4 (P2.2 + P1.4): historial SQLite en agent · Keycloak
-Sprint 5 (P2.3 + P3):   PostgreSQL · NAT hole punching
+Sprint 3 (P1b + P2.1): invite tokens · feature flags · server JWT validation
+Sprint 4 (P2.2 + P2.3): historial SQLite en agent · PostgreSQL en server
+Sprint 5 (P3):   NAT hole punching · relay fallback
 ```
 
 Lo más importante del Sprint 1 es que el adaptive redundancy funciona de verdad — el sistema mide pérdida real en las transferencias y el recomendador tiene datos para operar. Ese es el feature que le da valor académico al TP y actualmente es un cascarón vacío.

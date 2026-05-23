@@ -18,4 +18,8 @@ RUN python -m compileall -q -o 2 ./src/ && \
 RUN useradd -m appuser && chown -R appuser /app
 USER appuser
 ENV PYTHONPATH=/app/src
+# PYTHONOPTIMIZE=2 must match the -o 2 used in compileall above.
+# Python resolves *.opt-2.pyc only when running at optimization level 2;
+# without this, it looks for *.pyc (level 0) and fails to import.
+ENV PYTHONOPTIMIZE=2
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
