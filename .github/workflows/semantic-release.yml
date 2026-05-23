@@ -14,6 +14,9 @@ jobs:
   release:
     name: Semantic Release
     runs-on: ubuntu-latest
+    outputs:
+      new_release_published: ${{ steps.release.outputs.new_release_published }}
+      new_release_version: ${{ steps.release.outputs.new_release_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,10 +31,99 @@ jobs:
         run: npm ci
 
       - name: Release
+        id: release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
           GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
-        run: npx semantic-release
+        run: |
+          npx semantic-release
+          new_tag=$(git describe --tags --exact-match HEAD 2>/dev/null || echo "")
+          if [ -n "$new_tag" ]; then
+            echo "new_release_published=true" >> "$GITHUB_OUTPUT"
+            echo "new_release_version=${new_tag#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_release_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Electron builds: only when semantic-release actually publishes ────────────
+  build:
+    name: Build — ${{ matrix.platform }}
+    needs: release
+    if: needs.release.outputs.new_release_published == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            eb_flag: --linux AppImage
+          - os: windows-latest
+            platform: win
+            eb_flag: --win nsis
+          - os: macos-latest
+            platform: mac
+            eb_flag: --mac dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_release_version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install agent dependencies
+        working-directory: client/agent
+        run: uv sync --no-dev
+
+      - name: Install PyInstaller
+        working-directory: client/agent
+        run: uv pip install pyinstaller
+
+      - name: Build agent binary (Linux / macOS)
+        if: matrix.platform != 'win'
+        working-directory: client/agent
+        run: |
+          uv run pyinstaller rs_agent.spec --distpath dist --noconfirm
+          rm -rf ../resources/agent
+          mkdir -p ../resources/agent
+          cp -r dist/rs-agent/. ../resources/agent/
+          chmod +x ../resources/agent/rs-agent
+
+      - name: Build agent binary (Windows)
+        if: matrix.platform == 'win'
+        working-directory: client/agent
+        shell: pwsh
+        run: |
+          uv run pyinstaller rs_agent.spec --distpath dist --noconfirm
+          if (Test-Path ../resources/agent) { Remove-Item ../resources/agent -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path ../resources/agent | Out-Null
+          Copy-Item dist/rs-agent/* ../resources/agent/ -Recurse
+
+      - name: Install UI dependencies
+        working-directory: client/ui
+        run: npm install
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm install
+
+      - name: Build UI + Electron
+        working-directory: client
+        run: npm run build
+
+      - name: Package and publish
+        working-directory: client
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder ${{ matrix.eb_flag }} --publish always
