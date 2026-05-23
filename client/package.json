@@ -1,6 +1,6 @@
 {
   "name": "rockdove",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "RockDove — Reed-Solomon P2P file transfer",
   "main": "dist/electron/main.js",
   "repository": {
@@ -40,18 +40,41 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "ui/dist", "to": "ui/dist" },
-      { "from": "resources/agent", "to": "agent" }
+      {
+        "from": "ui/dist",
+        "to": "ui/dist"
+      },
+      {
+        "from": "resources/agent",
+        "to": "agent"
+      }
     ],
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Network"
     },
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
     },
     "mac": {
-      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
       "category": "public.app-category.utilities"
     },
     "publish": {
