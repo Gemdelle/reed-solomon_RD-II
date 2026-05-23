@@ -16,7 +16,7 @@ class ServerClient:
 
     @property
     def _base(self) -> str:
-        return self._settings.SERVER_URL
+        return token_store.get_server_url() or self._settings.SERVER_URL
 
     @property
     def _auth_headers(self) -> dict[str, str]:

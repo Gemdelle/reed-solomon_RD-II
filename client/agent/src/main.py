@@ -59,17 +59,20 @@ async def lifespan(app: FastAPI):
         set_transport(UDPTransport())
     await get_transport().start(settings.UDP_HOST, settings.UDP_PORT)
 
-    try:
-        result = await server_client.register(
-            peer_id=settings.PEER_ID,
-            api_url=settings.AGENT_API_URL,
-            udp_host=settings.UDP_HOST,
-            udp_port=settings.UDP_PORT,
-            transport=settings.TRANSPORT_MODE,
-        )
-        token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
-    except Exception:
-        pass
+    # Only register at startup if a service/device token is configured.
+    # Desktop OIDC peers register after the UI pushes the JWT via POST /auth/token.
+    if settings.AGENT_SERVICE_TOKEN or settings.INVITE_TOKEN:
+        try:
+            result = await server_client.register(
+                peer_id=settings.PEER_ID,
+                api_url=settings.AGENT_API_URL,
+                udp_host=settings.UDP_HOST,
+                udp_port=settings.UDP_PORT,
+                transport=settings.TRANSPORT_MODE,
+            )
+            token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
+        except Exception:
+            pass
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
     probe_task = asyncio.create_task(rtt_probe_loop())
     yield
@@ -122,25 +125,43 @@ async def auth_poll():
 
 class TokenPayload(BaseModel):
     token: str
+    server_url: str | None = None
+
+
+def _peer_id_from_jwt(token: str, fallback: str) -> str:
+    try:
+        import base64, json as _json
+        # Decode payload without verification (agent trusts the UI)
+        parts = token.split(".")
+        if len(parts) < 2:
+            return fallback
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        claims = _json.loads(base64.urlsafe_b64decode(padded))
+        return claims.get("preferred_username") or claims.get("sub") or fallback
+    except Exception:
+        return fallback
 
 
 @app.post("/auth/token", tags=["auth"])
 async def push_token(body: TokenPayload):
     """
-    UI pushes the OIDC access token here after login.
-    Agent stores it and re-registers with the central server.
+    UI pushes the OIDC access token (and server URL) here after login.
+    Agent stores them, derives peer_id from JWT claims, and registers.
     """
     token_store.set_token(body.token)
+    if body.server_url:
+        token_store.set_server_url(body.server_url)
     settings = get_settings()
+    peer_id = _peer_id_from_jwt(body.token, settings.PEER_ID)
     try:
         result = await server_client.register(
-            peer_id=settings.PEER_ID,
+            peer_id=peer_id,
             api_url=settings.AGENT_API_URL,
             udp_host=settings.UDP_HOST,
             udp_port=settings.UDP_PORT,
             transport=settings.TRANSPORT_MODE,
         )
-        token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
+        token_store.set_peer_id(result.get("peer_id", peer_id))
     except Exception:
         pass
     return {"ok": True}

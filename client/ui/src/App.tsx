@@ -40,7 +40,8 @@ export default function App() {
               console.log("[App] Processing callback...");
               const user = await handleCallback(url);
               console.log("[App] User authenticated:", user.profile.sub);
-              localStorage.setItem("peerId", user.profile.sub ?? "oidc-user");
+              const peerId = (user.profile as any).preferred_username ?? user.profile.sub ?? "oidc-user";
+              localStorage.setItem("peerId", peerId);
               localStorage.setItem("token", user.access_token ?? "");
               agentApi.setToken(user.access_token ?? "").catch(() => {});
               setConfig(loadConfig());
@@ -72,7 +73,7 @@ export default function App() {
                 : window.location.origin;
               initOidc(cfg.issuer, cfg.client_id, redirectUri);
               const user = await handleCallback();
-              const peerId = user.profile.sub ?? "oidc-user";
+              const peerId = (user.profile as any).preferred_username ?? user.profile.sub ?? "oidc-user";
               localStorage.setItem("peerId", peerId);
               localStorage.setItem("token", user.access_token ?? "");
               agentApi.setToken(user.access_token ?? "").catch(() => {});

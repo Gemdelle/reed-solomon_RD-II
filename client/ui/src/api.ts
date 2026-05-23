@@ -116,7 +116,7 @@ export const agentApi = {
     fetch(`${getAgentUrl()}/auth/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ token, server_url: getServerUrl() }),
     }).then((r) => json<{ ok: boolean }>(r)),
 
   // Files

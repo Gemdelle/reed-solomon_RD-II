@@ -5,6 +5,7 @@ Also tracks the peer_id assigned by the server after registration.
 
 _token: str = ""
 _peer_id: str = ""
+_server_url: str = ""
 
 
 def get_token() -> str:
@@ -23,3 +24,12 @@ def get_peer_id() -> str:
 def set_peer_id(pid: str) -> None:
     global _peer_id
     _peer_id = pid
+
+
+def get_server_url() -> str:
+    return _server_url
+
+
+def set_server_url(url: str) -> None:
+    global _server_url
+    _server_url = url

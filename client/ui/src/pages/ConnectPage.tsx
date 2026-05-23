@@ -9,7 +9,7 @@
  */
 import { useState } from "react";
 import type { AuthConfig } from "../types";
-import { serverApi, getAgentUrl } from "../api";
+import { serverApi, agentApi, getAgentUrl } from "../api";
 import { initOidc, startLogin } from "../auth/oidc";
 
 type Phase = "server" | "auth";
@@ -56,12 +56,11 @@ export default function ConnectPage() {
       await startLogin();
       // Se queda esperando al agente
       const user = await handleLoopback();
-      // Una vez que tenemos el user, React App.tsx se encargará de cargar el Dashboard
-      // pero forzamos un refresh del estado local para estar seguros
-      const peerId = user.profile.sub ?? "oidc-user";
+      const peerId = (user.profile as any).preferred_username ?? user.profile.sub ?? "oidc-user";
       localStorage.setItem("peerId", peerId);
       localStorage.setItem("token", user.access_token ?? "");
-      window.location.reload(); 
+      await agentApi.setToken(user.access_token ?? "").catch(() => {});
+      window.location.reload();
     } catch (e) {
       setError(`Error al iniciar SSO: ${(e as Error).message}`);
     } finally {
