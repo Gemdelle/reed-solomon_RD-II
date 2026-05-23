@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            eb_flag: --linux AppImage
+          - os: windows-latest
+            platform: win
+            eb_flag: --win nsis
+          - os: macos-latest
+            platform: mac
+            eb_flag: --mac dmg
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@v3
+
+      # ── Python agent: install deps and freeze binary ──────────────────────
+      - name: Install agent dependencies
+        working-directory: client/agent
+        run: uv sync --no-dev
+
+      - name: Install PyInstaller
+        working-directory: client/agent
+        run: uv pip install pyinstaller
+
+      - name: Build agent binary (Linux / macOS)
+        if: matrix.platform != 'win'
+        working-directory: client/agent
+        run: |
+          uv run pyinstaller rs_agent.spec --distpath dist --noconfirm
+          rm -rf ../resources/agent
+          mkdir -p ../resources/agent
+          cp -r dist/rs-agent/. ../resources/agent/
+          chmod +x ../resources/agent/rs-agent
+
+      - name: Build agent binary (Windows)
+        if: matrix.platform == 'win'
+        working-directory: client/agent
+        shell: pwsh
+        run: |
+          uv run pyinstaller rs_agent.spec --distpath dist --noconfirm
+          if (Test-Path ../resources/agent) { Remove-Item ../resources/agent -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path ../resources/agent | Out-Null
+          Copy-Item dist/rs-agent/* ../resources/agent/ -Recurse
+
+      # ── Node / Electron ───────────────────────────────────────────────────
+      - name: Install UI dependencies
+        working-directory: client/ui
+        run: npm install
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm install
+
+      - name: Build UI + Electron
+        working-directory: client
+        run: npm run build
+
+      # ── Package and publish ───────────────────────────────────────────────
+      - name: Package and publish
+        working-directory: client
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder ${{ matrix.eb_flag }} --publish always

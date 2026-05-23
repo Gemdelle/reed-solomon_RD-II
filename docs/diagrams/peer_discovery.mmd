@@ -1,0 +1,55 @@
+sequenceDiagram
+    actor U as Usuario A
+    participant EA as RockDove App (A)
+    participant AA as Agent A :8000
+    participant S as Servidor Central
+    participant WS as /peers/watch (WS)
+    participant EB as RockDove App (B)
+    participant AB as Agent B :8000
+
+    rect rgb(232, 244, 253)
+        Note over U,S: 1 · Peer B ya está online (registrado previamente)
+        AB->>S: POST /peers/register
+        S-->>WS: broadcast — snapshot actualizado
+    end
+
+    rect rgb(255, 248, 220)
+        Note over U,WS: 2 · Peer A abre la app y se conecta al servidor
+        U->>EA: abre RockDove, ingresa server URL
+        EA->>AA: spawna proceso Python
+        AA->>S: POST /peers/register {peer_id, udp_host, udp_port}
+        S-->>AA: 200 OK
+        S-->>WS: broadcast — Peer A ahora aparece como online
+        EA->>WS: WS connect /peers/watch
+        WS-->>EA: snapshot inicial (A + B online)
+        EA-->>U: Dashboard — Peer B visible y online
+    end
+
+    rect rgb(240, 255, 240)
+        Note over AA,S: 3 · Keepalive — presencia continua
+        loop cada 15 segundos
+            AA->>S: POST /peers/A/heartbeat
+            S-->>WS: broadcast (last_seen actualizado)
+            WS-->>EA: lista actualizada
+            WS-->>EB: lista actualizada
+        end
+    end
+
+    rect rgb(255, 243, 224)
+        Note over U,AB: 4 · Transferencia directa — el servidor solo da la dirección
+        U->>EA: selecciona Peer B · elige archivo
+        EA->>AA: GET /metrics/recommendation/B
+        AA->>S: GET /metrics/recommendation/B
+        S-->>AA: redundancy_level=0.25, quality="fair"
+        AA-->>EA: slider default = 25%
+        U->>EA: confirma envío
+        EA->>AA: POST /transfers/send {file_id, target_peer_id=B}
+        AA->>S: GET /peers/B  ← única consulta al servidor
+        S-->>AA: {udp_host: "1.2.3.4", udp_port: 9001}
+        Note over AA,AB: A partir de aquí el servidor no interviene
+        AA->>AB: UDP directo — bloques RS codificados
+        AB->>AB: RS decode + verificación SHA-256
+        AB-->>AA: TransferResult {status: ok/degraded/failed}
+        AA-->>EA: resultado
+        EA-->>U: ✅ ok / ⚠️ degraded / ❌ failed
+    end

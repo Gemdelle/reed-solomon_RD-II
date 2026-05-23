@@ -1,0 +1,63 @@
+{
+  "name": "rockdove",
+  "version": "0.1.0",
+  "description": "RockDove — Reed-Solomon P2P file transfer",
+  "main": "dist/electron/main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Gemdelle/reed-solomon_RD-II.git"
+  },
+  "scripts": {
+    "dev": "NODE_ENV=development concurrently \"npm run dev:ui\" \"npm run dev:electron\"",
+    "dev:ui": "npm run dev --prefix ui",
+    "dev:electron": "tsc -p electron/tsconfig.json && electron .",
+    "build:ui": "npm run build --prefix ui",
+    "build:electron": "tsc -p electron/tsconfig.json",
+    "build": "npm run build:ui && npm run build:electron",
+    "dist:local": "npm run build && electron-builder --publish never",
+    "release": "npm run build && electron-builder --publish always",
+    "typecheck": "tsc -p electron/tsconfig.json --noEmit",
+    "test": "npm run typecheck && vitest run --config vitest.electron.config.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "concurrently": "^9.0.0",
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0",
+    "happy-dom": "^17.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.0.0"
+  },
+  "build": {
+    "appId": "io.leafnoise.rockdove",
+    "productName": "RockDove",
+    "icon": "build-resources/icon",
+    "directories": {
+      "output": "dist/app"
+    },
+    "files": [
+      "dist/electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "ui/dist", "to": "ui/dist" },
+      { "from": "resources/agent", "to": "agent" }
+    ],
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Network"
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }],
+      "category": "public.app-category.utilities"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Gemdelle",
+      "repo": "reed-solomon_RD-II"
+    }
+  }
+}

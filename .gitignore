@@ -42,3 +42,13 @@ build/
 
 # Datos locales (fileserver storage)
 services/fileserver/data/
+
+# Electron packaging — frozen agent bundle and build output
+client/resources/agent/*
+!client/resources/agent/.gitkeep
+client/resources/agent/_internal/
+client/dist/
+client/ui/dist/
+client/agent/dist/
+client/agent/build/
+*.spec.bak

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Renders Mermaid diagrams via kroki.io and builds DOCX + PDF.
-# Requires: curl, pandoc, soffice (LibreOffice)
+# Renders Mermaid diagrams via @mermaid-js/mermaid-cli (npx) and builds DOCX + PDF.
+# Requires: node/npm, pandoc, soffice (LibreOffice)
 set -euo pipefail
 
 DOCS_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,15 +10,17 @@ IMG_DIR="$OUTPUT_DIR/img"
 
 mkdir -p "$IMG_DIR"
 
-echo "→ Rendering diagrams via kroki.io..."
+echo "→ Rendering Mermaid diagrams via @mermaid-js/mermaid-cli..."
 for mmd in "$DIAGRAMS_DIR"/*.mmd; do
   name=$(basename "$mmd" .mmd)
   out="$IMG_DIR/$name.png"
   echo "  $name.mmd → img/$name.png"
-  curl -sf -X POST "https://kroki.io/mermaid/png" \
-    -H "Content-Type: text/plain" \
-    --data-binary "@$mmd" \
-    -o "$out" || { echo "  ✗ Failed to render $name (check internet)"; exit 1; }
+  npx --yes @mermaid-js/mermaid-cli \
+    --input "$mmd" \
+    --output "$out" \
+    --backgroundColor white \
+    --quiet \
+    || { echo "  ✗ Failed to render $name"; exit 1; }
 done
 
 echo "→ Building DOCX..."

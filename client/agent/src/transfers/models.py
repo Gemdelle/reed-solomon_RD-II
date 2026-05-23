@@ -1,0 +1,35 @@
+from pydantic import BaseModel, field_validator
+
+from rs.models import TransferStatus
+
+
+class SendRequest(BaseModel):
+    file_id: str
+    target_peer_id: str
+    redundancy_level: float | None = None  # None → server recommendation
+
+    @field_validator("redundancy_level")
+    @classmethod
+    def _check_range(cls, v: float | None) -> float | None:
+        if v is not None and not 0.05 <= v <= 0.50:
+            raise ValueError("redundancy_level must be between 0.05 and 0.50")
+        return v
+
+
+class ReceiveRequest(BaseModel):
+    transfer_id: str
+    checksum: str
+    file_size: int
+    n: int
+    k: int
+    chunk_size: int
+    timeout: float = 30.0
+
+
+class TransferResult(BaseModel):
+    transfer_id: str
+    status: TransferStatus
+    recovered_blocks: int = 0
+    total_blocks: int = 0
+    file_id: str | None = None
+    reason: str | None = None

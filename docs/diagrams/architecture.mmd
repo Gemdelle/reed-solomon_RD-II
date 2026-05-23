@@ -1,30 +1,41 @@
 graph TB
-  subgraph mA["🖥️ Máquina Usuario A — instancia local"]
+  subgraph cloud["☁️ Servidor Central — Plano de Control (cloud)"]
+    direction LR
+    PR["Peer Registry\nPOST /peers/register\nPOST /peers/{id}/heartbeat\nGET /peers/{id}"]
+    WS["WebSocket Push\nGET /peers/watch\n— broadcast en cada\nregistro / heartbeat"]
+    MR["Métricas + Recomendador\nPOST /metrics/report\nGET /metrics/recommendation/{id}"]
+    PR --- WS
+  end
+
+  subgraph peerA["💻 Peer A — RockDove Desktop"]
     direction TB
-    WebA["Web :3000\nReact SPA"]
-    ApiA["API :8000\nFastAPI + redundancy module"]
-    FsA["File Server :9000\ninterno — no expuesto"]
-    WebA -->|HTTP REST| ApiA
-    ApiA -->|HTTP interno| FsA
+    UIA["React UI\n(ConnectPage / Dashboard)"]
+    AgentA["Python Agent :8000\nRS engine · storage\nUDP :9001"]
+    UIA -->|"HTTP 127.0.0.1:8000"| AgentA
   end
 
-  subgraph mB["🖥️ Máquina Usuario B — instancia local"]
+  subgraph peerB["💻 Peer B — RockDove Desktop"]
     direction TB
-    WebB["Web :3000\nReact SPA"]
-    ApiB["API :8000\nFastAPI + redundancy module"]
-    FsB["File Server :9000\ninterno — no expuesto"]
-    WebB -->|HTTP REST| ApiB
-    ApiB -->|HTTP interno| FsB
+    UIB["React UI"]
+    AgentB["Python Agent :8000\nRS engine · storage\nUDP :9001"]
+    UIB -->|"HTTP 127.0.0.1:8000"| AgentB
   end
 
-  subgraph cloud["☁️ Cloud compartido"]
-    KC["Keycloak :8080\nAuth + Peer Registry\nNO relaya datos"]
+  subgraph edge["🔧 Nodo Edge — Docker headless"]
+    AgentE["Python Agent\nUDP :9001\nsin interfaz web"]
   end
 
-  ApiA <-->|"UDP :9001\npaquetes RS encoded\ndatos nunca pasan por cloud"| ApiB
-  ApiA <-->|HTTPS — tokens + peer lookup| KC
-  ApiB <-->|HTTPS — tokens + peer lookup| KC
+  AgentA <-->|"HTTPS ① registro / heartbeat / peer lookup / métricas"| PR
+  AgentB <-->|"HTTPS ① registro / heartbeat / peer lookup / métricas"| PR
+  AgentE <-->|"HTTPS ① registro / heartbeat"| PR
 
-  style mA fill:#e8f4fd,stroke:#2196F3
-  style mB fill:#e8f5e9,stroke:#4CAF50
-  style cloud fill:#fff3e0,stroke:#FF9800
+  UIA <-.->|"WebSocket ② push en tiempo real\nquién está online y su dirección UDP"| WS
+  UIB <-.->|"WebSocket ②"| WS
+
+  AgentA <-->|"UDP ③ — bloques Reed-Solomon\n🔒 los datos NUNCA pasan por el servidor"| AgentB
+  AgentA -.->|"UDP ③"| AgentE
+
+  style cloud fill:#fff8e1,stroke:#f59e0b,color:#000
+  style peerA fill:#eff6ff,stroke:#3b82f6,color:#000
+  style peerB fill:#f0fdf4,stroke:#22c55e,color:#000
+  style edge fill:#faf5ff,stroke:#a855f7,color:#000

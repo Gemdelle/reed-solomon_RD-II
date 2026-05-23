@@ -1,0 +1,75 @@
+import { useEffect, useState } from "react";
+import type { AppConfig } from "./types";
+import ConnectPage from "./pages/ConnectPage";
+import DashboardPage from "./pages/DashboardPage";
+import { serverApi } from "./api";
+import { handleCallback, initOidc } from "./auth/oidc";
+
+function loadConfig(): AppConfig | null {
+  const serverUrl = localStorage.getItem("serverUrl");
+  const peerId = localStorage.getItem("peerId");
+  const agentUrl = localStorage.getItem("agentUrl") ?? window.rsAgent?.baseUrl ?? "http://localhost:8000";
+  const token = localStorage.getItem("token");
+  if (!serverUrl || !peerId) return null;
+  return { serverUrl, peerId, agentUrl, token };
+}
+
+export default function App() {
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [callbackPending, setCallbackPending] = useState(false);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const isOidcCallback = url.searchParams.has("code") || url.searchParams.has("state");
+
+    if (isOidcCallback) {
+      setCallbackPending(true);
+      const storedServerUrl = localStorage.getItem("serverUrl");
+      if (storedServerUrl) {
+        serverApi
+          .authConfig(storedServerUrl)
+          .then(async (cfg) => {
+            if (cfg.oidc_enabled && cfg.issuer && cfg.client_id) {
+              initOidc(cfg.issuer, cfg.client_id, window.location.origin);
+              const user = await handleCallback();
+              const peerId = user.profile.sub ?? "oidc-user";
+              localStorage.setItem("peerId", peerId);
+              localStorage.setItem("token", user.access_token ?? "");
+              history.replaceState({}, "", window.location.pathname);
+            }
+            setCallbackPending(false);
+            setConfig(loadConfig());
+          })
+          .catch(() => {
+            setCallbackPending(false);
+            setConfig(loadConfig());
+          });
+      } else {
+        setCallbackPending(false);
+      }
+    } else {
+      setConfig(loadConfig());
+    }
+  }, []);
+
+  const handleDisconnect = () => {
+    localStorage.removeItem("serverUrl");
+    localStorage.removeItem("peerId");
+    localStorage.removeItem("token");
+    localStorage.removeItem("inviteToken");
+    setConfig(null);
+  };
+
+  if (callbackPending) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950">
+        <p className="text-slate-400 text-sm">Completando inicio de sesión…</p>
+      </div>
+    );
+  }
+
+  if (!config) {
+    return <ConnectPage />;
+  }
+  return <DashboardPage config={config} onDisconnect={handleDisconnect} />;
+}

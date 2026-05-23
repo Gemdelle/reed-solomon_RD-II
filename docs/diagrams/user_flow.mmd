@@ -1,43 +1,46 @@
 sequenceDiagram
     actor U as Usuario
-    participant W as Web UI
-    participant A as API Gateway
-    participant K as Keycloak
-    participant F as File Server
-    participant P as Peer (otra máquina)
+    participant E as Electron UI
+    participant A as Agent (local :8000)
+    participant S as Servidor Central
+    participant P as Agent Peer (:8000)
 
     rect rgb(232, 244, 253)
-        Note over U,K: Autenticación
-        U->>W: Login con credenciales
-        W->>A: POST /auth/token
-        A->>K: Validar credenciales
-        K-->>A: JWT {org_id, user_id}
-        A-->>W: token + lista de peers online
-        W-->>U: Dashboard con peers de la org
+        Note over U,S: Arranque y registro
+        U->>E: Abre la app
+        E->>A: spawna proceso Python
+        A->>S: POST /peers/register
+        S-->>A: PeerInfo registrado
+        A-->>E: Agent listo
+        E-->>U: Dashboard con peers online
     end
 
     rect rgb(232, 245, 233)
-        Note over U,F: Subida de archivo
-        U->>W: Drag & drop archivo
-        W->>A: POST /files (multipart)
-        A->>F: POST /files
-        F-->>A: file_id + SHA-256
-        A-->>W: file_id
-        W-->>U: Archivo disponible en lista
+        Note over U,A: Subida de archivo
+        U->>E: Drag & drop archivo
+        E->>A: POST /files (multipart)
+        A->>A: guarda local + SHA-256
+        A-->>E: file_id
+        E-->>U: Archivo disponible en lista
     end
 
     rect rgb(255, 243, 224)
-        Note over U,P: Transferencia P2P
-        U->>W: Selecciona peer + nivel redundancia
-        W->>A: POST /transfer/send {file_id, peer_id, redundancy}
-        A->>K: GET peer IP:PORT
-        K-->>A: 203.0.113.42:9001
-        A->>F: GET /files/{file_id}
-        F-->>A: bytes del archivo
-        A->>A: RS encode → bloques UDP
+        Note over U,P: Transferencia P2P con redundancia adaptativa
+        U->>E: Selecciona peer
+        E->>A: solicita recomendación
+        A->>S: GET /metrics/recommendation/{peer_id}
+        S-->>A: redundancy_level=0.25, quality="fair"
+        A-->>E: slider default = 0.25
+        E-->>U: Slider sugerido (ajustable)
+        U->>E: Confirma envío
+        E->>A: POST /transfer/send {file_id, target_peer_id}
+        A->>S: GET /peers/{target_peer_id}
+        S-->>A: api_url, udp_host, udp_port
+        A->>P: POST /transfer/receive {transfer_id, checksum, n, k}
+        P-->>A: 202 accepted
         A-->>P: UDP packets (RS encoded)
-        P->>P: RS decode + verificar SHA-256
-        P-->>A: resultado {status, recovered_blocks}
-        A-->>W: TransferResponse
-        W-->>U: ✓ ok / ⚠ degraded / ✗ failed
+        P->>P: RS decode + SHA-256
+        P-->>A: status
+        A-->>E: TransferResult
+        E-->>U: ok / degraded / failed
     end

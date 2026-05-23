@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background: rounded dark square -->
+  <rect width="512" height="512" rx="110" fill="#0f172a"/>
+
+  <!-- Wing (drawn behind body) -->
+  <path fill="#475569"
+    d="M248 248
+       C210 202 148 174 136 198
+       C124 222 158 252 238 260 Z"/>
+  <!-- Wing sheen -->
+  <path fill="#64748b"
+    d="M244 253
+       C208 218 166 206 168 226
+       C170 242 200 254 242 257 Z"/>
+
+  <!-- Body -->
+  <ellipse cx="278" cy="276" rx="90" ry="50"
+    transform="rotate(-13 278 276)" fill="#94a3b8"/>
+
+  <!-- Neck -->
+  <ellipse cx="336" cy="242" rx="30" ry="24"
+    transform="rotate(-28 336 242)" fill="#94a3b8"/>
+
+  <!-- Head -->
+  <circle cx="362" cy="216" r="44" fill="#94a3b8"/>
+
+  <!-- Beak -->
+  <path fill="#e2e8f0" d="M400 204 L444 188 L400 228 Z"/>
+
+  <!-- Eye -->
+  <circle cx="374" cy="210" r="12" fill="#1e293b"/>
+  <circle cx="377" cy="207" r="5" fill="#f8fafc" fill-opacity="0.88"/>
+
+  <!-- Tail feathers -->
+  <path fill="#64748b"
+    d="M198 290 C164 306 144 332 158 350 C168 364 194 353 205 326 Z"/>
+  <path fill="#475569"
+    d="M202 306 C168 324 150 354 166 368 C176 379 200 366 205 340 Z"/>
+  <path fill="#334155"
+    d="M208 322 C178 344 162 372 178 382 C190 390 212 376 212 350 Z"/>
+</svg>

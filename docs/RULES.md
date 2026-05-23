@@ -5,61 +5,9 @@
 - Python 3.12+ for all backend services
 - FastAPI for all HTTP services
 - `reedsolo` for Reed-Solomon encoding/decoding
-- Node 20+ / React 18+ for frontend
-- Docker and docker compose for all deployment
-
----
-
-## Dependency Management — uv
-
-**`uv` is the only tool used for local Python development.** Never use `pip` directly on a dev machine.
-
-### Source of truth
-
-Each service has a `pyproject.toml`. The `uv.lock` file is committed to git and must stay in sync.
-
-### Docker build
-
-Docker uses `pip` with a `requirements.txt` generated from uv. **Never edit `requirements.txt` by hand** — it is always regenerated:
-
-```bash
-# From inside the service directory
-uv export --frozen --no-dev -o requirements.txt
-```
-
-Run this after every `uv add` / `uv remove` before building the image.
-
-### Local dev workflow
-
-```bash
-# First time setup (inside a service directory)
-cd services/api
-uv sync                        # installs all deps incl. dev group
-
-# Run the service locally
-uv run uvicorn main:app --reload --port 8000
-
-# Run tests
-uv run pytest                  # always via uv, never bare pytest
-
-# Add a production dependency
-uv add <package>
-uv export --frozen --no-dev -o requirements.txt   # regenerate for Docker
-
-# Add a dev-only dependency
-uv add --dev <package>
-```
-
-### CI / pipelines
-
-Pipelines install with pip from the committed `requirements.txt`:
-
-```yaml
-- run: pip install -r services/api/requirements.txt
-- run: pytest services/api/tests/
-```
-
-Never install uv in CI — the lockfile already produced a pinned `requirements.txt`.
+- Node 20+ / React 18+ for frontend (client/ui)
+- Electron for desktop client shell (client/electron)
+- Docker for containerized deployment
 
 ---
 
@@ -67,176 +15,176 @@ Never install uv in CI — the lockfile already produced a pinned `requirements.
 
 ```
 .
-├── services/
-│   ├── api/                  # API Gateway
+├── server/                   # Control plane — deploy once in cloud
+│   ├── src/
 │   │   ├── main.py
 │   │   ├── config.py
-│   │   ├── auth/             # JWT validation, Keycloak client
-│   │   ├── peers/            # peer discovery routes + heartbeat
-│   │   ├── files/            # proxy routes to fileserver
-│   │   └── redundancy/       # RS module — mounted at /transfer
-│   │       ├── router.py     # APIRouter
-│   │       ├── encoder.py    # RS encode
-│   │       ├── decoder.py    # RS decode
-│   │       ├── transport.py  # UDP socket management
-│   │       └── models.py     # Pydantic models
-│   ├── fileserver/           # File Server
-│   │   ├── main.py
-│   │   ├── storage.py
-│   │   └── models.py
-│   └── web/                  # React frontend
-│       └── src/
+│   │   ├── peers/            # Central peer registry
+│   │   ├── metrics/          # Telemetry + adaptive redundancy recommendation
+│   │   └── auth/             # Keycloak integration (future)
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── pyproject.toml
+│
+├── client/                   # Data plane — runs on each peer machine
+│   ├── agent/                # Python agent: RS engine + local storage + HTTP API
+│   │   ├── src/
+│   │   │   ├── main.py
+│   │   │   ├── config.py
+│   │   │   ├── server_client.py  # HTTP client to server (peers, metrics)
+│   │   │   ├── rs/               # RS encode/decode + UDP transport
+│   │   │   │   ├── encoder.py
+│   │   │   │   ├── decoder.py
+│   │   │   │   ├── transport.py
+│   │   │   │   └── models.py
+│   │   │   ├── storage/          # Local file storage (embedded — no separate service)
+│   │   │   │   ├── store.py
+│   │   │   │   └── models.py
+│   │   │   ├── transfers/        # Transfer HTTP routes
+│   │   │   │   ├── router.py
+│   │   │   │   └── models.py
+│   │   │   └── files/            # File management HTTP routes
+│   │   │       └── router.py
+│   │   ├── Dockerfile
+│   │   └── pyproject.toml
+│   ├── electron/             # Electron shell (spawns agent, loads UI)
+│   │   ├── main.ts
+│   │   └── preload.ts
+│   ├── ui/                   # React SPA (Vite)
+│   └── package.json
+│
 ├── docs/
-├── docker-compose.yml
-├── docker-compose.edge.yml
-└── .env.example
+├── .env.example
+└── .gitignore
+```
+
+---
+
+## Dependency Management — uv
+
+**`uv` is the only tool used for local Python development.** Never use `pip` directly.
+
+```bash
+# Inside server/ or client/agent/
+uv sync                        # install all deps incl. dev group
+uv run uvicorn main:app --reload --port 8080   # server
+uv run uvicorn main:app --reload --port 8000   # agent
+
+uv add <package>
+uv export --frozen --no-dev -o requirements.txt   # regenerate before Docker build
 ```
 
 ---
 
 ## FastAPI Conventions
 
-**Router mounting**: each subdomain of functionality is an `APIRouter` with a prefix. The `redundancy` module is a first-class router, not a separate service.
-
-```python
-# api/main.py
-from api.redundancy.router import router as redundancy_router
-from api.files.router import router as files_router
-from api.peers.router import router as peers_router
-
-app.include_router(redundancy_router, prefix="/transfer", tags=["transfer"])
-app.include_router(files_router, prefix="/files", tags=["files"])
-app.include_router(peers_router, prefix="/peers", tags=["peers"])
-```
-
-**Dependency injection**: use FastAPI `Depends` for auth, DB session, and service clients. Never instantiate service clients inside route handlers.
-
-```python
-# Correct
-@router.post("/send")
-async def send_file(req: TransferRequest, user=Depends(get_current_user)):
-    ...
-
-# Wrong
-@router.post("/send")
-async def send_file(req: TransferRequest):
-    token = request.headers["Authorization"]  # manual — don't do this
-    ...
-```
-
-**Response models**: every endpoint must declare a `response_model`. No naked `dict` returns.
-
-**Async**: all route handlers must be `async def`. Use `asyncio` for UDP operations.
+Same as before: `APIRouter` with prefix, `Depends` for injection, `response_model` on every endpoint.
 
 ---
 
-## Pydantic Models
+## Module Ownership
 
-- Use Pydantic v2 (`model_config`, `model_validator`, not `Config` class)
-- Input models: suffix `Request` (e.g. `TransferRequest`)
-- Output models: suffix `Response` (e.g. `TransferResponse`)
-- Shared domain models: no suffix (e.g. `TransferStatus`, `FileMetadata`)
-
-```python
-from pydantic import BaseModel, Field
-from enum import Enum
-
-class TransferStatus(str, Enum):
-    ok = "ok"
-    degraded = "degraded"
-    failed = "failed"
-
-class TransferResponse(BaseModel):
-    transfer_id: str
-    status: TransferStatus
-    recovered_blocks: int
-    total_blocks: int
-```
+| Area | Location |
+|------|----------|
+| RS encode/decode | `client/agent/src/rs/encoder.py`, `decoder.py` |
+| UDP transport | `client/agent/src/rs/transport.py` |
+| Local file storage | `client/agent/src/storage/store.py` |
+| Transfer routes | `client/agent/src/transfers/router.py` |
+| File routes | `client/agent/src/files/router.py` |
+| Server communication | `client/agent/src/server_client.py` |
+| Peer registry | `server/src/peers/router.py` |
+| Metrics + recommendation | `server/src/metrics/` |
+| Electron shell | `client/electron/main.ts` |
 
 ---
 
 ## Redundancy Module Rules
 
-1. **No business logic in `router.py`** — only request validation, dependency injection, response formatting. Logic lives in `encoder.py`, `decoder.py`, `transport.py`.
-
-2. **`transport.py` owns the UDP socket** — never open UDP sockets outside this module.
-
-3. **RS parameters are always derived from `redundancy_level`** — never accept raw `n`/`k` from the client.
-
-4. **Checksum verification is mandatory** — `decoder.py` must verify SHA-256 before returning a result. A decode without checksum verification must not exist.
-
-5. **Transfer IDs are UUIDs** — generated by the sender, included in every packet header.
+1. **No business logic in `transfers/router.py`** — logic lives in `rs/`.
+2. **`rs/transport.py` owns the UDP socket** — never open UDP sockets elsewhere.
+3. **RS parameters always derived from `redundancy_level`** — never accept raw `n`/`k` from client.
+4. **Checksum verification is mandatory** — `rs/decoder.py` always verifies SHA-256.
+5. **Transfer IDs are UUIDs** — generated by sender, in every packet header.
 
 ---
 
-## File Server Rules
+## Storage Rules
 
-1. File server is **internal only** — never expose port 9000 to the host in production compose.
+1. Storage is **embedded in the agent** — no separate fileserver service.
+2. All file operations return `file_id` (UUID). File names are metadata.
+3. Checksum is computed at upload time by `storage/store.py` and stored immutably.
+4. The storage module does not know about peers or transfers.
 
-2. All file operations return `file_id` (UUID), not file names. File names are metadata.
+---
 
-3. Checksum is computed at upload time and stored immutably. It must never be recomputed on the fly.
+## Server Rules
 
-4. The file server does not know about users or orgs — scoping is enforced at the API Gateway layer.
+1. The server **never touches file data** — only identity, peer registry, and metrics.
+2. `server_client.py` is the only place the agent makes HTTP calls to the server.
+3. The agent starts and registers with the server on startup. Heartbeat runs every 15s.
+4. If the server is unreachable, the agent starts anyway — transfers already in flight are unaffected.
 
 ---
 
 ## Authentication Rules
 
-1. Every route in `api` (except `/health`) requires a valid JWT.
-
-2. JWT validation uses Keycloak's JWKS endpoint — never hardcode secrets.
-
-3. `org_id` is extracted from the JWT claim `realm` (Keycloak realm name = org identifier). Do not trust `org_id` from request body.
-
-4. Peer operations must verify that target peer belongs to the same org before initiating transfer.
-
----
-
-## Docker Rules
-
-1. Each service has its own `Dockerfile`. No shared images between services.
-
-2. Use multi-stage builds for production images (builder + runtime stage).
-
-3. Non-root user in all production containers.
-
-4. Health checks defined for all services in `docker-compose.yml`.
-
-5. The `fileserver` service must not have a `ports` mapping in the default compose file.
-
-6. Environment variables are defined in `.env.example`. Secrets are never committed.
+1. JWT validation via Keycloak JWKS — never hardcode secrets.
+2. `org_id` comes from JWT claims, never from request body.
+3. Peer operations must verify target peer belongs to same org.
+4. *(Currently: Keycloak integration is TODO. Server uses in-memory registry.)*
 
 ---
 
 ## Environment Variables
 
-| Variable | Service | Description |
+### Agent (`client/agent/.env`)
+
+| Variable | Default | Description |
 |----------|---------|-------------|
-| `KEYCLOAK_URL` | api | Keycloak base URL |
-| `KEYCLOAK_REALM` | api | Admin realm (for user listing) |
-| `KEYCLOAK_CLIENT_ID` | api | OIDC client ID |
-| `KEYCLOAK_CLIENT_SECRET` | api | OIDC client secret |
-| `FILESERVER_URL` | api | Internal URL of fileserver |
-| `UDP_HOST` | api | Host to bind UDP listener |
-| `UDP_PORT` | api | Port for UDP transfers (default: 9001) |
-| `STORAGE_PATH` | fileserver | Path for file storage (default: /data) |
-| `KEYCLOAK_ADMIN` | auth | Keycloak admin username |
-| `KEYCLOAK_ADMIN_PASSWORD` | auth | Keycloak admin password |
+| `SERVER_URL` | `http://localhost:8080` | Central server base URL |
+| `PEER_ID` | `default-peer` | This peer's unique identifier |
+| `AGENT_API_URL` | `http://localhost:8000` | This agent's own HTTP URL (registered with server) |
+| `UDP_HOST` | `0.0.0.0` | UDP listen host |
+| `UDP_PORT` | `9001` | UDP listen port |
+| `STORAGE_PATH` | `./data` | Local file storage path |
+
+### Server (`server/.env`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HEARTBEAT_TTL_S` | `30` | Seconds until peer is considered offline |
+
+---
+
+## Docker Deployment
+
+### Server (cloud VM)
+```bash
+cd server && docker compose up --build
+```
+
+### Agent (headless / IoT)
+```bash
+cd client/agent
+docker build -t rs-agent .
+docker run -e PEER_ID=edge-01 -e SERVER_URL=http://myserver:8080 \
+           -p 8000:8000 -p 9001:9001/udp rs-agent
+```
+
+### Desktop (Electron)
+```bash
+cd client && npm install && npm run dev
+```
 
 ---
 
 ## Testing Rules
 
-1. Unit tests for `encoder.py` and `decoder.py` are **mandatory** before merging.
-
-2. Tests must cover: encode→decode roundtrip, decode with simulated erasures, checksum mismatch detection.
-
+1. Unit tests for `rs/encoder.py` and `rs/decoder.py` are **mandatory** before merging.
+2. Tests must cover: encode→decode roundtrip, decode with simulated erasures, checksum mismatch.
 3. Use `pytest` and `httpx.AsyncClient` for API route tests.
-
 4. No mocking of RS encode/decode in transfer tests — use real codec.
-
-5. A simulated packet loss helper must exist in tests:
+5. Packet loss helper must exist in tests:
    ```python
    def drop_packets(packets: list, loss_rate: float) -> list:
        return [p for p in packets if random.random() > loss_rate]
@@ -246,8 +194,7 @@ class TransferResponse(BaseModel):
 
 ## Git Conventions
 
-- Branch naming: `feature/<name>`, `fix/<name>`, `chore/<name>`
-- Commit messages: imperative, present tense (`add UDP listener`, not `added`)
-- One logical change per commit
-- PRs require at least one review before merge to `main`
+- Branch: `feature/<name>`, `fix/<name>`, `chore/<name>`
+- Commits: imperative, present tense
+- PRs require one review before merge to `main`
 - Do not commit `.env` files — only `.env.example`

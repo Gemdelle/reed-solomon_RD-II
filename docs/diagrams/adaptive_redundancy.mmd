@@ -1,0 +1,23 @@
+flowchart LR
+  subgraph agent["Agent (peer)"]
+    direction TB
+    M["Mide RTT, jitter\npacket loss"]
+    FETCH["GET /metrics/recommendation\n→ redundancy_level"]
+    SLIDER["UI: slider default\n(ajustable por usuario)"]
+    M --> FETCH
+    FETCH --> SLIDER
+  end
+
+  subgraph server["Servidor Central"]
+    direction TB
+    COL["Collector\núltimas 10 muestras"]
+    REC["Recommender"]
+    TABLE["excellent → 0.05\ngood     → 0.10\nfair     → 0.25\npoor     → 0.40\ncritical → 0.50"]
+    COL --> REC --> TABLE
+  end
+
+  M -->|"POST /metrics/report\nrtt_ms, jitter_ms, loss_rate"| COL
+  TABLE -->|"level + quality"| FETCH
+
+  style agent fill:#e8f4fd,stroke:#2196F3
+  style server fill:#fff3e0,stroke:#FF9800

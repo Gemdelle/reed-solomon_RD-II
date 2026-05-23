@@ -2,220 +2,173 @@
 
 ## Overview
 
-P2P file transfer system with Reed-Solomon forward error correction over UDP. Designed for reliable transfer over unreliable connections, with organization-based isolation and configurable redundancy.
+P2P file transfer system with Reed-Solomon forward error correction over UDP. Designed for reliable transfer over unreliable connections, with organization-based isolation and adaptive redundancy driven by real-time network telemetry.
 
 **Primary use cases:**
-- Org members transferring files peer-to-peer through the backend
-- Edge device ingestion: sending sensitive files to a remote node with unstable connectivity (cellular, satellite)
+- Org members transferring files peer-to-peer directly between machines
+- Edge device ingestion over unstable links (cellular, satellite)
+- IoT headless receivers that bootstrap via a known peer token
 
 ---
 
 ## Deployment Model
 
-**This is the most important thing to understand about this architecture.**
-
-Each participant runs their own full instance of the stack on their own machine. The API Gateway on each machine is the UDP peer — it owns the UDP socket and handles RS encoding/decoding directly. The browser cannot open raw UDP sockets, so the local backend acts as the user's network agent.
+The system is split into two independent planes:
 
 ```
-What's LOCAL per user (runs on each machine):
-  api  ·  fileserver  ·  web
-
-What's SHARED (one instance, e.g. a cloud VM):
-  Keycloak — only used for auth tokens and peer registry (IP lookup)
+CONTROL PLANE (one instance, cloud/VM)           DATA PLANE (one per peer machine)
+─────────────────────────────────────            ──────────────────────────────────
+server/                                          client/agent/
+  ├── Peer registry                                ├── RS encoder / decoder
+  ├── Network metrics collector                    ├── UDP transport
+  └── Redundancy recommendation engine             ├── Local file storage
+                                                   └── Transfer orchestration
 ```
 
-The actual file data never touches the shared server. Keycloak only answers "who is User B and what is their IP:PORT?" The transfer goes machine-to-machine directly over UDP.
+**The server never sees file data.** It only answers:
+- "Who is peer B and what is their address?"
+- "What redundancy level should I use given my recent network conditions?"
 
-**Analogy:** Think of a torrent client. The app running on your machine IS the peer. The tracker (Keycloak here) only helps peers find each other — it doesn't relay data.
+**The transfer is always machine-to-machine over UDP.** The server is not in the data path.
 
-### Why this matters for the edge use case
-
-An edge device (Raspberry Pi, industrial PC) runs `docker-compose.edge.yml` — only `api` + `fileserver`, no web UI, no auth. It listens on UDP port 9001. A remote operator sends a file directly to the edge device's IP over UDP with RS encoding. The unreliable link (cellular, satellite) drops packets; RS reconstructs the file anyway. No central server is in the data path.
-
-### P2P Transfer Flow (two machines)
-
-```
-Machine A (User A)                           Machine B (User B)
-─────────────────                            ─────────────────
-browser → POST /transfer/send
-           { file_id, target: "userB",
-             redundancy: 0.30 }
-              │
-              ▼
-api queries Keycloak ──── HTTPS ────▶ "userB is at 203.0.113.42:9001"
-              │
-              ▼
-api fetches file from own fileserver
-api RS-encodes → UDP packets
-              │
-              └──────────── UDP ────────────▶ api :9001 receives packets
-                                              RS-decode, verify SHA-256
-                                              store in own fileserver
-              ◀────────── HTTPS ─────────── POST /transfer/{id}/result
-browser receives status: ok / degraded / failed
-```
+**Analogy:** Like Tailscale or Syncthing — a coordination server helps peers find each other, but the actual data flows directly.
 
 ---
 
 ## Component Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Browser / Web UI                          │
-│                    React SPA  ·  port 3000                       │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │ HTTPS / REST
-┌───────────────────────────▼─────────────────────────────────────┐
-│                      API Gateway                                  │
-│                  FastAPI  ·  port 8000                            │
-│                                                                   │
-│   ┌────────────────┐   ┌─────────────────────────────────────┐   │
-│   │  /auth/*        │   │  /transfer/*  (redundancy module)   │   │
-│   │  /files/*       │   │  APIRouter  — RS encode/decode      │   │
-│   │  /peers/*       │   │  UDP socket manager                 │   │
-│   └────────┬───────┘   └──────────────────┬──────────────────┘   │
-└────────────┼──────────────────────────────┼────────────────────── ┘
-             │ HTTP (internal)              │ UDP
-             ▼                             ▼
-┌────────────────────────┐      ┌──────────────────────────────────┐
-│     File Server         │      │  Peer Node                        │
-│  FastAPI  ·  port 9000  │      │  (another stack instance)         │
-│                         │      │  API Gateway  ·  port 8000        │
-│  - store / retrieve     │      │  redundancy module listening UDP  │
-│  - SHA-256 checksum     │      └──────────────────────────────────┘
-│  - file metadata        │
-│  - internal only        │
-└────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────────┐
-│                    Keycloak  ·  port 8080                         │
-│   realm per org  ·  OIDC/JWT  ·  org_id + user_id in claims       │
-└──────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│                           SERVER  (cloud)                           │
+│                                                                     │
+│  POST /peers/register   POST /peers/{id}/heartbeat                  │
+│  GET  /peers            GET  /peers/{id}                            │
+│  POST /metrics/report   GET  /metrics/recommendation/{peer_id}      │
+│                                                                     │
+│  ┌──────────────────┐   ┌──────────────────────────────────────┐   │
+│  │  Peer Registry    │   │  Metrics / Recommender               │   │
+│  │  (→ Keycloak)     │   │  quality score → redundancy level    │   │
+│  └──────────────────┘   └──────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────┘
+                │  HTTPS (control only)            ▲ metrics reports
+                ▼                                  │
+┌────────────────────────────────────────────────────────────────────┐
+│                     AGENT  (per peer machine)                       │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  Electron Shell  (desktop)  OR  headless Docker  (IoT/edge)  │   │
+│  └───────────────────────────────┬─────────────────────────────┘   │
+│                                  │ spawns / embeds                  │
+│  ┌───────────────────────────────▼─────────────────────────────┐   │
+│  │  Python Agent  ·  port 8000                                   │   │
+│  │                                                               │   │
+│  │  /files   →  storage/store.py  (local filesystem)            │   │
+│  │  /transfer → rs/ (encode, decode, UDP transport)             │   │
+│  └───────────────────────────────────────────────────────────── ┘  │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  React UI  (Vite)  — loaded by Electron, or served locally   │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────────┘
+                           │ UDP  (data path — direct, machine-to-machine)
+                           ▼
+                   [other peer's Agent]
 ```
 
 ---
 
 ## Services
 
-### `api` — API Gateway
+### `server` — Control Plane
+
 - **Runtime**: Python 3.12, FastAPI
-- **Port**: 8000
-- **Responsibilities**:
-  - Validate JWTs (Keycloak JWKS endpoint)
-  - Proxy file operations to `fileserver`
-  - Mount `redundancy` module as an `APIRouter` at `/transfer`
-  - Expose `/peers` endpoint (queries Keycloak for org members + heartbeat state)
-- **Does NOT**: store files, do raw UDP directly (delegated to redundancy module)
-
-### `api/redundancy/` — Redundancy Module
-- **Type**: FastAPI `APIRouter`, lives inside `api` service
-- **Mounted at**: `/transfer`
-- **Responsibilities**:
-  - Accept transfer requests (file_id, target_peer, redundancy_level)
-  - Fetch file bytes from `fileserver`
-  - RS-encode data into UDP packets
-  - Send packets to target peer's UDP listener
-  - On receive: RS-decode, verify SHA-256 checksum, store in own `fileserver`
-  - Report transfer status: `ok` / `degraded` / `failed`
-- **Owns**: UDP socket lifecycle, RS parameter calculation
-
-### `fileserver` — File Server
-- **Runtime**: Python 3.12, FastAPI
-- **Port**: 9000 (internal network only, not exposed)
-- **Responsibilities**:
-  - `POST /files` — store file, compute and persist SHA-256
-  - `GET /files/{file_id}` — retrieve raw bytes
-  - `GET /files/{file_id}/checksum` — retrieve stored checksum
-  - `DELETE /files/{file_id}`
-- **Storage**: local volume (`/data`), replaceable with S3-compatible backend
-
-### `auth` — Identity Provider
-- **Runtime**: Keycloak (official image)
 - **Port**: 8080
-- **Model**:
-  - One Keycloak realm per organization
-  - Users belong to groups within their realm
-  - JWT claims include `org_id`, `user_id`, `realm_access`
-- **API Gateway integration**: validates tokens via JWKS (`/realms/{realm}/protocol/openid-connect/certs`)
+- **Deploy**: single cloud instance shared by all org peers
 
-### `web` — Frontend
-- **Runtime**: Node / React (Vite)
-- **Port**: 3000
-- **Responsibilities**:
-  - Org/user management UI
-  - File list and upload
-  - Peer list (org members online)
-  - Transfer dialog: target peer selector + redundancy slider
-  - Transfer history with status badges (`ok` / `degraded` / `failed`)
-- **Communicates only with**: `api` (never directly with `fileserver` or Keycloak)
+#### `server/peers/` — Peer Registry
+
+Stores `{peer_id → api_url, udp_host, udp_port, last_seen}`. Peers register on startup and send a heartbeat every 15s. Peers not seen within `HEARTBEAT_TTL_S` (default 30s) are considered offline.
+
+#### `server/metrics/` — Telemetry + Adaptive Redundancy
+
+Peers periodically report network metrics (RTT, jitter, packet loss). The server averages the last 10 samples and maps them to a recommended `redundancy_level`:
+
+| Quality | Loss | RTT | Jitter | Recommended r |
+|---------|------|-----|--------|---------------|
+| Excellent | < 1% | < 50ms | < 5ms | 0.05 |
+| Good | < 5% | < 150ms | < 20ms | 0.10 |
+| Fair | < 15% | < 500ms | < 80ms | 0.25 |
+| Poor | < 30% | < 1000ms | < 200ms | 0.40 |
+| Critical | any worse | — | — | 0.50 |
+
+The client displays this as a default in the redundancy slider. The user can override.
 
 ---
 
-## Data Flows
+### `client/agent` — Data Plane Agent
 
-### Upload
-```
-User → POST /files (multipart) → API Gateway
-     → POST /internal/files     → File Server
-     ← file_id + checksum       ←
-     ← file_id                  ←
-```
+- **Runtime**: Python 3.12, FastAPI
+- **Port**: 8000 (HTTP) + 9001 (UDP)
+- **Deploy**: one instance per peer machine (desktop via Electron, or headless Docker)
 
-### Transfer (P2P)
+#### `rs/` — Reed-Solomon Engine
+
+Unchanged from original design. See [REED_SOLOMON.md](./REED_SOLOMON.md).
+
+#### `storage/` — Local File Storage
+
+Embedded in the agent process. No separate fileserver service. Files stored to `STORAGE_PATH` with SHA-256 checksums.
+
+#### `server_client.py` — Server Communication
+
+Single module responsible for all HTTP calls to the server: registration, heartbeat, peer discovery, metric reporting, and redundancy recommendation fetch.
+
+---
+
+### `client/electron` — Desktop Shell
+
+Electron main process that:
+1. Spawns the Python agent as a child process
+2. Loads the React UI (`client/ui/`)
+3. Exposes `window.rsAgent.baseUrl` (`http://127.0.0.1:8000`) via `contextBridge`
+
+The UI makes all API calls to the local agent over HTTP — no direct Electron IPC needed.
+
+### `client/ui` — React Frontend (SPA)
+
+Same responsibilities as the original `web` service. Communicates exclusively with the local agent at `window.rsAgent.baseUrl`.
+
+---
+
+## P2P Transfer Flow
+
 ```
-Initiator                    API Gateway (initiator)         API Gateway (target)
-─────────                    ───────────────────────         ────────────────────
+User (Electron UI)                Agent A                    Agent B
+──────────────────                ───────                    ───────
 POST /transfer/send
-  file_id
-  target_peer_id
-  redundancy_level (0.0–0.5)
-                    → fetch file bytes from fileserver
-                    → RS-encode into blocks
-                    → UDP packets → → → → → → → → → → receive UDP packets
-                                                        RS-decode blocks
-                                                        reconstruct bytes
-                                                        verify SHA-256
-                                                        store in own fileserver
-                    ← transfer_result {status, stats} ←
-← status response ←
+  file_id, target_peer_id
+  (redundancy_level optional)
+                      → GET recommendation from server
+                      → GET peer B address from server
+                      → encode_file(bytes, redundancy_level)
+                      → POST /transfer/receive to Agent B
+                                                 ← 202 accepted
+                      → UDP packets → → → → → → → receive
+                                                   RS decode
+                                                   verify SHA-256
+                                                   store locally
+                      ← poll GET /transfer/{id}/status
+                      ← {status: ok/degraded/failed}
+← result ←
 ```
-
-### Peer Discovery
-```
-GET /peers  →  API Gateway
-           →  Keycloak: list users in same realm/org
-           →  filter by heartbeat (last_seen < 30s)
-           ←  [{user_id, username, address, last_seen}]
-```
-
-Peers register their transfer endpoint (IP:UDP_PORT) on login and maintain a heartbeat via `POST /peers/heartbeat`.
-
----
-
-## Organization Model
-
-- Each organization maps to a Keycloak realm
-- Users can only see and transfer to peers in their own org
-- Files are scoped per user (org isolation enforced at API layer)
-- Cross-org transfer is not supported in MVP
 
 ---
 
 ## Redundancy Configuration
 
-The redundancy level is expressed as a ratio `r = (n - k) / n` where:
-- `k` = number of original data symbols per block
-- `n` = total symbols after encoding (data + parity)
-- `r` controls what percentage of UDP packets can be lost and still recover
+See [REED_SOLOMON.md](./REED_SOLOMON.md) for the full RS parameter spec.
 
-| Preset | r | RS params | Overhead | Tolerates |
-|--------|---|-----------|----------|-----------|
-| Fast | 0.10 | n=10, k=9 | ~11% | 10% loss |
-| Balanced | 0.25 | n=8, k=6 | ~33% | 25% loss |
-| Resilient | 0.50 | n=10, k=5 | 100% | 50% loss |
-| Custom | 0.05–0.50 | derived | variable | variable |
-
-See [REED_SOLOMON.md](./REED_SOLOMON.md) for encoding/decoding spec and parameter derivation.
+`redundancy_level` in `SendRequest` is optional. If omitted, the agent fetches a recommendation from `GET /metrics/recommendation/{peer_id}` on the server, based on recent network telemetry. The slider in the UI shows this value as the default and lets the user override.
 
 ---
 
@@ -231,25 +184,27 @@ See [REED_SOLOMON.md](./REED_SOLOMON.md) for encoding/decoding spec and paramete
 
 ## Deployment Profiles
 
-### `full` (default)
-All services: `web`, `api`, `fileserver`, `auth` (Keycloak).
+### Desktop (Electron)
+Full experience. Electron spawns the Python agent and loads the React UI. No Docker required on the end user's machine.
 
-### `edge`
-Minimal profile for resource-constrained nodes. No `web`, no `auth`. Only `api` (redundancy module as receiver) + `fileserver`. Receives transfers from a full-profile instance.
+### Headless / Edge (Docker)
+```bash
+docker run -e PEER_ID=edge-01 -e SERVER_URL=http://myserver:8080 \
+           -p 9001:9001/udp rs-agent
+```
+No web UI. Agent listens for incoming UDP transfers and stores received files locally. Used for IoT / industrial edge nodes.
 
-```yaml
-# docker-compose.edge.yml — see compose files for full spec
-services: [api, fileserver]
+### Server
+```bash
+cd server && docker compose up --build
 ```
 
 ---
 
 ## Port Reference
 
-| Service | Port | Exposure |
-|---------|------|----------|
-| web | 3000 | public |
-| api | 8000 | public |
-| api UDP | 9001 | public (UDP) |
-| fileserver | 9000 | internal only |
-| auth (Keycloak) | 8080 | public (admin) |
+| Component | Port | Protocol |
+|-----------|------|----------|
+| Server | 8080 | TCP (HTTP) |
+| Agent HTTP | 8000 | TCP (HTTP) |
+| Agent UDP | 9001 | UDP |
