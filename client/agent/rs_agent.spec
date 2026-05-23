@@ -1,14 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for the RS Transfer agent — onedir mode.
-# Run from client/agent/: pyinstaller rs_agent.spec --distpath dist --noconfirm
-# Output: dist/rs-agent/   (directory, not single file)
+
 a = Analysis(
-    ["src/run.py"],          # explicit entry point — forces asyncio loop / h11
-    pathex=["src"],
+    ["run.py"],
+    pathex=["src", "."],
     binaries=[],
     datas=[],
     hiddenimports=[
-        # uvicorn internals (h11 path only; uvloop/httptools excluded on purpose)
+        # uvicorn internals
         "uvicorn.logging",
         "uvicorn.loops",
         "uvicorn.loops.auto",
@@ -24,7 +23,8 @@ a = Analysis(
         "uvicorn.lifespan.on",
         "anyio",
         "anyio._backends._asyncio",
-        # our subpackages
+        # our modules (imported directly since src is in pathex)
+        "main",
         "config",
         "server_client",
         "peers",
@@ -42,6 +42,8 @@ a = Analysis(
         "storage",
         "storage.store",
         "storage.models",
+        "metrics",
+        "metrics.probe",
     ],
     hookspath=[],
     hooksconfig={},
@@ -54,7 +56,7 @@ exe = EXE(
     pyz,
     a.scripts,
     [],
-    exclude_binaries=True,   # onedir: binaries collected separately
+    exclude_binaries=True,
     name="rs-agent",
     debug=False,
     bootloader_ignore_signals=False,
@@ -68,5 +70,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="rs-agent",         # output dir: dist/rs-agent/
+    name="rs-agent",
 )

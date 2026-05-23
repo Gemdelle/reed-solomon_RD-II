@@ -1,11 +1,17 @@
 """
 PyInstaller entry point for the frozen agent binary.
-Pins loop and http implementations explicitly so uvicorn does not probe for
-uvloop / httptools at runtime (both cause hangs inside a frozen bundle).
 """
 import os
+import sys
 import uvicorn
-from main import app  # import object directly — frozen sys.path can't resolve "main:app" string
+
+if not getattr(sys, 'frozen', False):
+    # Dev mode: add src/ to path so flat imports (import main, import config, …) work
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, os.path.join(base_dir, "src"))
+
+import main
+app = main.app
 
 if __name__ == "__main__":
     uvicorn.run(

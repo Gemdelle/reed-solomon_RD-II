@@ -9,7 +9,11 @@ import type {
 
 declare global {
   interface Window {
-    rsAgent?: { baseUrl: string };
+    rsAgent?: {
+      baseUrl: string;
+      openExternal?: (url: string) => void;
+      onOidcCallback?: (callback: (url: string) => void) => void;
+    };
   }
 }
 
@@ -70,14 +74,14 @@ export const agentApi = {
 
   // Files
   listFiles: () =>
-    fetch(`${getAgentUrl()}/files`, { headers: authHeaders() }).then((r) =>
+    fetch(`${getAgentUrl()}/files/`, { headers: authHeaders() }).then((r) =>
       json<FileMetadata[]>(r)
     ),
 
   uploadFile: (file: File) => {
     const fd = new FormData();
     fd.append("file", file);
-    return fetch(`${getAgentUrl()}/files`, {
+    return fetch(`${getAgentUrl()}/files/`, {
       method: "POST",
       body: fd,
       headers: authHeaders(),
@@ -109,7 +113,7 @@ export const agentApi = {
     }).then((r) => json<TransferResult>(r)),
 
   listTransfers: () =>
-    fetch(`${getAgentUrl()}/transfer`, { headers: authHeaders() }).then((r) =>
+    fetch(`${getAgentUrl()}/transfer/`, { headers: authHeaders() }).then((r) =>
       json<TransferResult[]>(r)
     ),
 };

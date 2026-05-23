@@ -13,8 +13,8 @@ cd "$AGENT_DIR"
 uv sync --no-dev
 uv pip install pyinstaller
 
-# --optimize 2: compile .pyc at level 2 — removes docstrings AND assert statements
-uv run pyinstaller rs_agent.spec --distpath dist --noconfirm --optimize 2
+# Build the agent
+uv run pyinstaller rs_agent.spec --distpath dist --noconfirm
 
 # Sync the onedir output into resources/agent/
 # rsync preserves _internal/ and all support libs

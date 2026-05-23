@@ -1,5 +1,7 @@
+import os
 import socket
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings
@@ -14,6 +16,12 @@ def _detect_local_ip() -> str:
         return "127.0.0.1"
 
 
+def _default_storage_path() -> str:
+    xdg = os.environ.get("XDG_DATA_HOME", "")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+    return str(base / "rockdove")
+
+
 class Settings(BaseSettings):
     SERVER_URL: str = "http://localhost:8080"
     PEER_ID: str = "default-peer"
@@ -21,7 +29,7 @@ class Settings(BaseSettings):
     AGENT_PORT: int = 8000
     UDP_HOST: str = "0.0.0.0"
     UDP_PORT: int = 9001
-    STORAGE_PATH: str = "./data"
+    STORAGE_PATH: str = _default_storage_path()
     NETWORK_HINT: str = "auto"
     AGENT_SERVICE_TOKEN: str = ""
     INVITE_TOKEN: str = ""

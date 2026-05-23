@@ -32,7 +32,11 @@ export default function ConnectPage() {
       const cfg = await serverApi.authConfig(url);
       setAuthConfig(cfg);
       if (cfg.oidc_enabled && cfg.issuer && cfg.client_id) {
-        initOidc(cfg.issuer, cfg.client_id, window.location.origin);
+        // En Electron usamos el Agente como Loopback (http://127.0.0.1:8000/auth/callback)
+        const redirectUri = window.rsAgent?.openExternal
+          ? `${getAgentUrl()}/auth/callback` 
+          : window.location.origin;
+        initOidc(cfg.issuer, cfg.client_id, redirectUri);
       }
       setPhase("auth");
     } catch (e) {
@@ -45,10 +49,23 @@ export default function ConnectPage() {
   async function handleSsoLogin() {
     if (!authConfig?.oidc_enabled) return;
     localStorage.setItem("serverUrl", serverUrl.replace(/\/$/, ""));
+    setError(null);
+    setLoading(true);
     try {
+      const { handleLoopback } = await import("../auth/oidc");
       await startLogin();
+      // Se queda esperando al agente
+      const user = await handleLoopback();
+      // Una vez que tenemos el user, React App.tsx se encargará de cargar el Dashboard
+      // pero forzamos un refresh del estado local para estar seguros
+      const peerId = user.profile.sub ?? "oidc-user";
+      localStorage.setItem("peerId", peerId);
+      localStorage.setItem("token", user.access_token ?? "");
+      window.location.reload(); 
     } catch (e) {
       setError(`Error al iniciar SSO: ${(e as Error).message}`);
+    } finally {
+      setLoading(false);
     }
   }
 

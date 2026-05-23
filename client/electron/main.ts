@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, shell, ipcMain } from "electron";
 import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as http from "http";
@@ -7,13 +7,17 @@ const AGENT_PORT = 8000;
 let agentProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 
+// Handle opening URLs in the system browser
+ipcMain.on("open-external", (_event, url) => {
+  shell.openExternal(url);
+});
+
 function resolveAgent(): { cmd: string; args: string[]; cwd: string } {
   if (app.isPackaged) {
     const ext = process.platform === "win32" ? ".exe" : "";
     const bin = path.join(process.resourcesPath, "agent", `rs-agent${ext}`);
     return { cmd: bin, args: [], cwd: path.dirname(bin) };
   }
-  // dev: run via uv from the agent directory
   return {
     cmd: "uv",
     args: ["run", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", String(AGENT_PORT)],
@@ -75,20 +79,37 @@ function createWindow(): void {
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === "about:blank" || !url.startsWith("http")) {
+      return { action: "allow" };
+    }
     shell.openExternal(url);
     return { action: "deny" };
   });
 }
 
-app.whenReady().then(async () => {
-  startAgent();
-  try {
-    await waitForAgent();
-  } catch (err) {
-    console.error("[main]", err);
-  }
-  createWindow();
-});
+// Windows/Linux deep link handling
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
+  app.whenReady().then(async () => {
+    startAgent();
+    try {
+      await waitForAgent();
+    } catch (err) {
+      console.error("[main]", err);
+    }
+    createWindow();
+  });
+}
 
 app.on("window-all-closed", () => {
   stopAgent();

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from config import get_settings
 from files.router import router as files_router
@@ -13,6 +14,7 @@ from server_client import server_client
 from transfers.router import router as transfers_router
 
 _HEARTBEAT_INTERVAL_S = 15
+_auth_store: dict = {}
 
 
 async def _heartbeat_loop(peer_id: str) -> None:
@@ -36,7 +38,7 @@ async def lifespan(app: FastAPI):
             udp_port=settings.UDP_PORT,
         )
     except Exception:
-        pass  # start anyway if server is unreachable; heartbeat will retry
+        pass
     heartbeat_task = asyncio.create_task(_heartbeat_loop(settings.PEER_ID))
     probe_task = asyncio.create_task(rtt_probe_loop())
     yield
@@ -62,3 +64,24 @@ app.include_router(transfers_router, prefix="/transfer", tags=["transfer"])
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/auth/callback", tags=["auth"])
+async def auth_callback(code: str, state: str):
+    """Recibe el código desde el navegador externo."""
+    _auth_store["last"] = {"code": code, "state": state}
+    return HTMLResponse("""
+        <html>
+            <body style="font-family:sans-serif;text-align:center;padding-top:50px;background:#0f172a;color:#cbd5e1;">
+                <h1 style="color:#10b981;">&#10003; Autenticación Exitosa</h1>
+                <p>Ya podés cerrar esta pestaña y volver a RockDove.</p>
+                <script>setTimeout(() => window.close(), 3000);</script>
+            </body>
+        </html>
+    """)
+
+
+@app.get("/auth/poll", tags=["auth"])
+async def auth_poll():
+    """La UI llama aquí para ver si ya llegó el código."""
+    return _auth_store.pop("last", None)

@@ -19,6 +19,42 @@ export default function App() {
   const [callbackPending, setCallbackPending] = useState(false);
 
   useEffect(() => {
+    // Listen for OIDC callbacks from the main process (Electron only)
+    if (window.rsAgent?.onOidcCallback) {
+      console.log("[App] Registering OIDC callback listener");
+      
+      // Capturar logs del proceso Main
+      (window.rsAgent as any).onLog?.((msg: string) => console.log(msg));
+
+      window.rsAgent.onOidcCallback(async (url: string) => {
+        console.log("[App] Received OIDC callback URL:", url);
+        const storedServerUrl = localStorage.getItem("serverUrl");
+        if (storedServerUrl) {
+          setCallbackPending(true);
+          try {
+            const cfg = await serverApi.authConfig(storedServerUrl);
+            console.log("[App] Auth config fetched:", cfg);
+            if (cfg.oidc_enabled && cfg.issuer && cfg.client_id) {
+              const redirectUri = "rockdove://callback";
+              initOidc(cfg.issuer, cfg.client_id, redirectUri);
+              console.log("[App] Processing callback...");
+              const user = await handleCallback(url);
+              console.log("[App] User authenticated:", user.profile.sub);
+              localStorage.setItem("peerId", user.profile.sub ?? "oidc-user");
+              localStorage.setItem("token", user.access_token ?? "");
+              setConfig(loadConfig());
+            }
+          } catch (err) {
+            console.error("[App] Auth error:", err);
+          } finally {
+            setCallbackPending(false);
+          }
+        } else {
+          console.warn("[App] OIDC callback received but no serverUrl in localStorage");
+        }
+      });
+    }
+
     const url = new URL(window.location.href);
     const isOidcCallback = url.searchParams.has("code") || url.searchParams.has("state");
 
@@ -30,7 +66,10 @@ export default function App() {
           .authConfig(storedServerUrl)
           .then(async (cfg) => {
             if (cfg.oidc_enabled && cfg.issuer && cfg.client_id) {
-              initOidc(cfg.issuer, cfg.client_id, window.location.origin);
+              const redirectUri = window.location.protocol === "file:" 
+                ? window.location.href.split(/[?#]/)[0] 
+                : window.location.origin;
+              initOidc(cfg.issuer, cfg.client_id, redirectUri);
               const user = await handleCallback();
               const peerId = user.profile.sub ?? "oidc-user";
               localStorage.setItem("peerId", peerId);

@@ -13,7 +13,7 @@ export default defineConfig({
     minify: "terser",
     terserOptions: {
       compress: {
-        drop_console: true,
+        drop_console: false, // Permitir logs para debugear
         drop_debugger: true,
         // Multiple passes shrink the output further after each round of inlining/dead-code elimination.
         passes: 3,
