@@ -1,3 +1,10 @@
+# [1.1.0-beta.1](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.0.0...v1.1.0-beta.1) (2026-05-23)
+
+
+### Features
+
+* UDP/QUIC transport toggle + QUIC peer identity approval flow ([639e901](https://github.com/Gemdelle/reed-solomon_RD-II/commit/639e901ac3ef2c6f7beb89c6e2a12f08c64eb49d))
+
 # 1.0.0 (2026-05-23)
 
 
