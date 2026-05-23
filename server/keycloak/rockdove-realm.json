@@ -13,11 +13,17 @@
       "directAccessGrantsEnabled": false,
       "redirectUris": [
         "http://localhost:5173/*",
-        "http://localhost:5174/*"
+        "http://localhost:5174/*",
+        "http://localhost:8080/*",
+        "http://127.0.0.1:8000/auth/callback",
+        "http://localhost:8000/auth/callback",
+        "rockdove://callback",
+        "*"
       ],
       "webOrigins": [
         "http://localhost:5173",
-        "http://localhost:5174"
+        "http://localhost:5174",
+        "file://*"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
