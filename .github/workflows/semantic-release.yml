@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - develop
 
 permissions:
   contents: write
@@ -170,6 +171,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "v${{ needs.release.outputs.new_release_version }}" \
-            --draft=false \
-            --repo "${{ github.repository }}"
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            gh release edit "v${{ needs.release.outputs.new_release_version }}" \
+              --draft=false \
+              --prerelease=false \
+              --latest \
+              --repo "${{ github.repository }}"
+          else
+            gh release edit "v${{ needs.release.outputs.new_release_version }}" \
+              --draft=false \
+              --prerelease \
+              --repo "${{ github.repository }}"
+          fi
