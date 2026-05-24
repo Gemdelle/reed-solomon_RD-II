@@ -23,28 +23,40 @@ _auth_store: dict = {}
 
 
 async def _heartbeat_loop() -> None:
+    consecutive_failures = 0
     while True:
         await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
         settings = get_settings()
         pid = token_store.get_peer_id() or settings.PEER_ID
+
+        async def _reregister() -> None:
+            try:
+                result = await server_client.register(
+                    peer_id=pid,
+                    api_url=settings.AGENT_API_URL,
+                    udp_host=settings.udp_advertise_host,
+                    udp_port=settings.UDP_PORT,
+                    transport=settings.TRANSPORT_MODE,
+                )
+                token_store.set_peer_id(result.get("peer_id", pid))
+            except Exception:
+                pass
+
         try:
             await server_client.heartbeat(pid)
+            consecutive_failures = 0
         except httpx.HTTPStatusError as exc:
+            consecutive_failures += 1
             if exc.response.status_code == 404:
-                # Peer TTL expired (e.g. server restart) — re-register silently.
-                try:
-                    result = await server_client.register(
-                        peer_id=settings.PEER_ID,
-                        api_url=settings.AGENT_API_URL,
-                        udp_host=settings.udp_advertise_host,
-                        udp_port=settings.UDP_PORT,
-                        transport=settings.TRANSPORT_MODE,
-                    )
-                    token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
-                except Exception:
-                    pass
+                # Peer expired from registry (server restart / long outage).
+                await _reregister()
+                consecutive_failures = 0
         except Exception:
-            pass
+            consecutive_failures += 1
+            # After 2+ consecutive transport failures the server likely restarted;
+            # attempt re-registration so we come back online as soon as it's up.
+            if consecutive_failures >= 2:
+                await _reregister()
 
 
 @asynccontextmanager

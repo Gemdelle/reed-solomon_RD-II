@@ -4,7 +4,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    HEARTBEAT_TTL_S: int = 30
+    # How long a peer key lives in Redis without any heartbeat (cleanup TTL).
+    HEARTBEAT_TTL_S: int = 600       # 10 min — key survives temporary disconnects
+    # Age threshold for computing online=True from last_seen timestamp.
+    HEARTBEAT_TIMEOUT_S: int = 45    # peer marked offline after 45s of silence
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # Keycloak / OIDC

@@ -110,10 +110,22 @@ async def _visible_groups(
 
 # ── Redis snapshot ────────────────────────────────────────────────────────────
 
+def _compute_online(last_seen_iso: str, timeout_s: int) -> bool:
+    """Returns True if last_seen is within timeout_s seconds of now."""
+    try:
+        last_seen = datetime.fromisoformat(last_seen_iso)
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - last_seen).total_seconds() < timeout_s
+    except Exception:
+        return False
+
+
 async def _snapshot(org_id: str, caller: CallerInfo) -> list[dict]:
     r = get_redis()
     scope = await _get_scope(org_id)
     visible = await _visible_groups(caller, scope)
+    timeout_s = get_settings().HEARTBEAT_TIMEOUT_S
 
     result = []
     async for key in r.scan_iter(f"peer:{org_id}:*"):
@@ -123,13 +135,14 @@ async def _snapshot(org_id: str, caller: CallerInfo) -> list[dict]:
         peer_group = data.get("group", "default")
         if visible is not None and peer_group not in visible:
             continue
+        last_seen = data.get("last_seen", "")
         result.append({
             "peer_id": data["peer_id"],
             "api_url": data["api_url"],
             "udp_host": data["udp_host"],
             "udp_port": int(data["udp_port"]),
-            "last_seen": data["last_seen"],
-            "online": True,
+            "last_seen": last_seen,
+            "online": _compute_online(last_seen, timeout_s),
             "group": peer_group,
             "org_id": org_id,
             "transport": data.get("transport", "udp"),
@@ -263,13 +276,14 @@ async def get_peer(
     data = await r.hgetall(f"peer:{caller.org_id}:{peer_id}")
     if not data:
         raise HTTPException(404, "Peer not found")
+    last_seen = data.get("last_seen", "")
     return PeerInfo(
         peer_id=data["peer_id"],
         api_url=data["api_url"],
         udp_host=data["udp_host"],
         udp_port=int(data["udp_port"]),
-        last_seen=data["last_seen"],
-        online=True,
+        last_seen=last_seen,
+        online=_compute_online(last_seen, get_settings().HEARTBEAT_TIMEOUT_S),
         group=data.get("group", "default"),
         org_id=data.get("org_id", caller.org_id),
         transport=data.get("transport", "udp"),
