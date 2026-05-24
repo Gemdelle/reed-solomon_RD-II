@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { serverApi, getServerUrl } from "../api";
-import type { DeviceTokenInfo } from "../types";
+import type { DeviceTokenInfo, PeerInfo } from "../types";
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 interface Props {}
 
-type Tab = "scopes" | "invites" | "device-tokens";
+type Tab = "scopes" | "invites" | "device-tokens" | "metrics";
 
 interface GeneratedInvite {
   token: string;
@@ -509,16 +509,112 @@ function DeviceTokensTab() {
   );
 }
 
+// ── Metrics tab ──────────────────────────────────────────────────────────────
+
+function MetricsTab() {
+  const [peers, setPeers] = useState<PeerInfo[]>([]);
+  const [selectedPeer, setSelectedPeer] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    serverApi
+      .listPeers()
+      .then((ps) => setPeers(ps.sort((a, b) => a.peer_id.localeCompare(b.peer_id))))
+      .catch((e) => setError(`Error cargando peers: ${(e as Error).message}`));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedPeer) {
+      setMetrics(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    serverApi
+      .getPeerMetrics(selectedPeer)
+      .then((res) => setMetrics(res.raw))
+      .catch((e) => setError(`Error cargando métricas: ${(e as Error).message}`))
+      .finally(() => setLoading(false));
+  }, [selectedPeer]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-1.5">
+        <label className="text-xs text-slate-500 font-medium">Seleccionar Peer</label>
+        <select
+          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500 appearance-none"
+          value={selectedPeer || ""}
+          onChange={(e) => setSelectedPeer(e.target.value)}
+        >
+          <option value="">-- Seleccionar un peer --</option>
+          {peers.map((p) => (
+            <option key={p.peer_id} value={p.peer_id}>
+              {p.peer_id} [{p.group}] {p.online ? "🟢" : "⚪"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {loading && <p className="text-xs text-slate-500 animate-pulse">Consultando agente…</p>}
+
+      {error && (
+        <p className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
+          {error}
+        </p>
+      )}
+
+      {metrics && (
+        <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-300">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-500 font-medium">Métricas en tiempo real (Prometheus)</p>
+            <button 
+              onClick={() => {
+                if (selectedPeer) {
+                  setLoading(true);
+                  serverApi.getPeerMetrics(selectedPeer)
+                    .then(res => setMetrics(res.raw))
+                    .catch(e => setError(e.message))
+                    .finally(() => setLoading(false));
+                }
+              }}
+              className="text-[10px] text-brand-400 hover:text-brand-300 font-medium uppercase tracking-wider"
+            >
+              Actualizar
+            </button>
+          </div>
+          <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+            <pre className="p-4 text-[10px] font-mono text-slate-400 overflow-auto max-h-[400px] leading-relaxed scrollbar-thin scrollbar-thumb-slate-800">
+              {metrics}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {!selectedPeer && !error && (
+        <div className="py-12 flex flex-col items-center justify-center border-2 border-dashed border-slate-800/50 rounded-2xl">
+          <div className="w-10 h-10 rounded-full bg-slate-800/50 flex items-center justify-center mb-3">
+            <span className="text-lg">📊</span>
+          </div>
+          <p className="text-xs text-slate-500">Seleccioná un peer para visualizar su telemetría</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 const TAB_LABELS: Record<Tab, string> = {
-  "scopes": "Visibilidad de grupos",
-  "invites": "Invites (un uso)",
+  "scopes": "Visibilidad",
+  "invites": "Invites",
   "device-tokens": "Device Tokens",
+  "metrics": "Network Health (OTel)",
 };
 
 export default function AdminPanel(_props: Props) {
-  const [tab, setTab] = useState<Tab>("device-tokens");
+  const [tab, setTab] = useState<Tab>("metrics");
 
   return (
     <div className="flex flex-col h-full">
@@ -550,6 +646,7 @@ export default function AdminPanel(_props: Props) {
         {tab === "scopes" && <ScopesTab />}
         {tab === "invites" && <InvitesTab />}
         {tab === "device-tokens" && <DeviceTokensTab />}
+        {tab === "metrics" && <MetricsTab />}
       </div>
     </div>
   );

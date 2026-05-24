@@ -15,6 +15,7 @@ from rs.encoder import encode_file
 from rs.models import TransferStatus
 from rs.transport import QUICTransport, UDPTransport, get_transport, set_transport
 from server_client import server_client
+from metrics.otel import get_meter
 from storage.db import insert_transfer, list_history
 from storage.store import FileStorage
 from transfers.models import HistoryEntry, IncomingConnection, ReceiveRequest, SendRequest, TransferResult
@@ -27,6 +28,7 @@ _transport_requests: dict[str, dict] = {}
 
 @router.post("/send", response_model=TransferResult)
 async def send_file(req: SendRequest) -> TransferResult:
+    get_meter().create_counter("rs_transfers_total").add(1, {"direction": "sent"})
     settings = get_settings()
     storage = FileStorage(settings.STORAGE_PATH)
 
@@ -92,6 +94,7 @@ async def send_file(req: SendRequest) -> TransferResult:
 
     t_send = time.monotonic()
     await get_transport().send(packets, target_udp_host, target_udp_port)
+    get_meter().create_counter("rs_packets_sent_total").add(len(packets))
 
     result = TransferResult(
         transfer_id=transfer_id,
@@ -158,6 +161,7 @@ async def receive_transfer(req: ReceiveRequest, background_tasks: BackgroundTask
 
 
 async def _process_incoming(req: ReceiveRequest) -> None:
+    get_meter().create_counter("rs_transfers_total").add(1, {"direction": "received"})
     settings = get_settings()
     transport = get_transport()
 
@@ -179,6 +183,9 @@ async def _process_incoming(req: ReceiveRequest) -> None:
 
     packets = await transport.collect(req.transfer_id, timeout=req.timeout)
     result = decode_transfer(packets, req.checksum)
+    
+    if result.recovered_blocks > 0:
+        get_meter().create_counter("rs_packets_recovered_total").add(result.recovered_blocks)
 
     file_id = None
     if result.status != TransferStatus.failed and result.file_bytes:

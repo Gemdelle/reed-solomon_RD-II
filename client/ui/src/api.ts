@@ -77,6 +77,11 @@ export const serverApi = {
       (r) => json<ScopeConfig>(r)
     ),
 
+  listPeers: () =>
+    fetch(`${getServerUrl()}/peers`, { headers: authHeaders() }).then((r) =>
+      json<PeerInfo[]>(r)
+    ),
+
   setScopes: (cfg: ScopeConfig) =>
     fetch(`${getServerUrl()}/peers/scopes`, {
       method: "PUT",
@@ -111,6 +116,11 @@ export const serverApi = {
     const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
     return new WebSocket(url);
   },
+
+  getPeerMetrics: (peerId: string) =>
+    fetch(`${getServerUrl()}/peers/${peerId}/metrics`, {
+      headers: authHeaders(),
+    }).then((r) => json<{ raw: string }>(r)),
 };
 
 // ── Agent API (data plane) ────────────────────────────────────────────────────

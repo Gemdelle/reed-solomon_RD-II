@@ -77,12 +77,18 @@ class ServerClient:
             return r.json()
 
     async def report_metrics(
-        self, peer_id: str, rtt_ms: float, jitter_ms: float, loss_rate: float
+        self, peer_id: str, rtt_ms: float, jitter_ms: float, loss_rate: float, target_peer_id: str = "server"
     ) -> None:
         async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
             await c.post(
                 f"{self._base}/metrics/report",
-                json={"peer_id": peer_id, "rtt_ms": rtt_ms, "jitter_ms": jitter_ms, "loss_rate": loss_rate},
+                json={
+                    "peer_id": peer_id,
+                    "target_peer_id": target_peer_id,
+                    "rtt_ms": rtt_ms,
+                    "jitter_ms": jitter_ms,
+                    "loss_rate": loss_rate
+                },
                 headers=self._auth_headers,
             )
 

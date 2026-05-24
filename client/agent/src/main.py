@@ -18,6 +18,7 @@ from metrics.probe import rtt_probe_loop
 from peers.router import router as peers_router
 from rs.transport import QUICTransport, UDPTransport, get_transport, set_transport
 from server_client import server_client
+from metrics.otel import setup_otel, init_custom_metrics
 import storage.db as db
 import token_store
 from transfers.router import router as transfers_router
@@ -129,6 +130,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="RS Transfer Agent", version="0.1.0", lifespan=lifespan)
+
+# Setup OpenTelemetry
+settings = get_settings()
+setup_otel(app, service_name=f"rs-agent-{settings.PEER_ID}")
+init_custom_metrics()
 
 app.add_middleware(
     CORSMiddleware,

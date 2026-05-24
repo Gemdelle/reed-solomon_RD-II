@@ -23,6 +23,7 @@ WebSocket /peers/watch:
 """
 import asyncio
 import json
+import httpx
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -32,6 +33,7 @@ from auth.deps import CallerInfo, extract_auth
 from config import get_settings
 from invites.router import validate_invite
 from redis_client import get_redis
+from neo4j_client import get_neo4j
 
 router = APIRouter()
 
@@ -122,31 +124,37 @@ def _compute_online(last_seen_iso: str, timeout_s: int) -> bool:
 
 
 async def _snapshot(org_id: str, caller: CallerInfo) -> list[dict]:
-    r = get_redis()
+    driver = get_neo4j()
     scope = await _get_scope(org_id)
     visible = await _visible_groups(caller, scope)
     timeout_s = get_settings().HEARTBEAT_TIMEOUT_S
 
+    query = (
+        "MATCH (p:Peer {org_id: $org_id}) "
+        "RETURN p"
+    )
+    
     result = []
-    async for key in r.scan_iter(f"peer:{org_id}:*"):
-        data = await r.hgetall(key)
-        if not data:
-            continue
-        peer_group = data.get("group", "default")
-        if visible is not None and peer_group not in visible:
-            continue
-        last_seen = data.get("last_seen", "")
-        result.append({
-            "peer_id": data["peer_id"],
-            "api_url": data["api_url"],
-            "udp_host": data["udp_host"],
-            "udp_port": int(data["udp_port"]),
-            "last_seen": last_seen,
-            "online": _compute_online(last_seen, timeout_s),
-            "group": peer_group,
-            "org_id": org_id,
-            "transport": data.get("transport", "udp"),
-        })
+    async with driver.session() as session:
+        records = await session.run(query, org_id=org_id)
+        async for record in records:
+            p = record["p"]
+            peer_group = p.get("group", "default")
+            if visible is not None and peer_group not in visible:
+                continue
+            
+            last_seen = p.get("last_seen", "")
+            result.append({
+                "peer_id": p["peer_id"],
+                "api_url": p["api_url"],
+                "udp_host": p["udp_host"],
+                "udp_port": int(p["udp_port"]),
+                "last_seen": last_seen,
+                "online": _compute_online(last_seen, timeout_s),
+                "group": peer_group,
+                "org_id": org_id,
+                "transport": p.get("transport", "udp"),
+            })
     return result
 
 
@@ -193,22 +201,37 @@ async def register(
         caller.groups[0] if (settings.OIDC_ENABLED and caller.groups) else reg.group
     )
 
-    r = get_redis()
+    driver = get_neo4j()
     now = datetime.now(timezone.utc).isoformat()
-    ttl = settings.HEARTBEAT_TTL_S
-    key = f"peer:{caller.org_id}:{effective_peer_id}"
-    await r.hset(key, mapping={
-        "peer_id": effective_peer_id,
-        "api_url": reg.api_url,
-        "udp_host": reg.udp_host,
-        "udp_port": str(reg.udp_port),
-        "last_seen": now,
-        "network_hint": reg.network_hint,
-        "group": effective_group,
-        "org_id": caller.org_id,
-        "transport": reg.transport,
-    })
-    await r.expire(key, ttl)
+    
+    query = (
+        "MERGE (p:Peer {peer_id: $peer_id, org_id: $org_id}) "
+        "SET p += { "
+        "  api_url: $api_url, "
+        "  udp_host: $udp_host, "
+        "  udp_port: $udp_port, "
+        "  last_seen: $last_seen, "
+        "  network_hint: $network_hint, "
+        "  group: $group, "
+        "  transport: $transport "
+        "} "
+        "RETURN p"
+    )
+    
+    async with driver.session() as session:
+        await session.run(
+            query,
+            peer_id=effective_peer_id,
+            org_id=caller.org_id,
+            api_url=reg.api_url,
+            udp_host=reg.udp_host,
+            udp_port=reg.udp_port,
+            last_seen=now,
+            network_hint=reg.network_hint,
+            group=effective_group,
+            transport=reg.transport,
+        )
+
     await _broadcast(caller.org_id, caller)
     return PeerInfo(
         peer_id=effective_peer_id,
@@ -228,13 +251,20 @@ async def heartbeat(
     peer_id: str,
     caller: CallerInfo = Depends(extract_auth),
 ) -> dict:
-    r = get_redis()
-    key = f"peer:{caller.org_id}:{peer_id}"
-    if not await r.exists(key):
-        raise HTTPException(404, "Peer not registered")
+    driver = get_neo4j()
     now = datetime.now(timezone.utc).isoformat()
-    await r.hset(key, "last_seen", now)
-    await r.expire(key, get_settings().HEARTBEAT_TTL_S)
+    
+    query = (
+        "MATCH (p:Peer {peer_id: $peer_id, org_id: $org_id}) "
+        "SET p.last_seen = $now "
+        "RETURN p"
+    )
+    
+    async with driver.session() as session:
+        result = await session.run(query, peer_id=peer_id, org_id=caller.org_id, now=now)
+        if not await result.single():
+            raise HTTPException(404, "Peer not registered")
+
     await _broadcast(caller.org_id, caller)
     return {"status": "ok"}
 
@@ -272,22 +302,77 @@ async def get_peer(
     peer_id: str,
     caller: CallerInfo = Depends(extract_auth),
 ) -> PeerInfo:
-    r = get_redis()
-    data = await r.hgetall(f"peer:{caller.org_id}:{peer_id}")
-    if not data:
-        raise HTTPException(404, "Peer not found")
-    last_seen = data.get("last_seen", "")
-    return PeerInfo(
-        peer_id=data["peer_id"],
-        api_url=data["api_url"],
-        udp_host=data["udp_host"],
-        udp_port=int(data["udp_port"]),
-        last_seen=last_seen,
-        online=_compute_online(last_seen, get_settings().HEARTBEAT_TIMEOUT_S),
-        group=data.get("group", "default"),
-        org_id=data.get("org_id", caller.org_id),
-        transport=data.get("transport", "udp"),
+    driver = get_neo4j()
+    query = (
+        "MATCH (p:Peer {peer_id: $peer_id, org_id: $org_id}) "
+        "RETURN p"
     )
+    async with driver.session() as session:
+        result = await session.run(query, peer_id=peer_id, org_id=caller.org_id)
+        record = await result.single()
+        if not record:
+            raise HTTPException(404, "Peer not found")
+        
+        p = record["p"]
+        last_seen = p.get("last_seen", "")
+        return PeerInfo(
+            peer_id=p["peer_id"],
+            api_url=p["api_url"],
+            udp_host=p["udp_host"],
+            udp_port=int(p["udp_port"]),
+            last_seen=last_seen,
+            online=_compute_online(last_seen, get_settings().HEARTBEAT_TIMEOUT_S),
+            group=p.get("group", "default"),
+            org_id=p.get("org_id", caller.org_id),
+            transport=p.get("transport", "udp"),
+        )
+
+
+@router.delete("/{peer_id}")
+async def delete_peer(
+    peer_id: str,
+    caller: CallerInfo = Depends(extract_auth),
+) -> dict:
+    if get_settings().OIDC_ENABLED and not caller.is_admin:
+        raise HTTPException(403, "Admin required")
+    
+    driver = get_neo4j()
+    query = (
+        "MATCH (p:Peer {peer_id: $peer_id, org_id: $org_id}) "
+        "DETACH DELETE p"
+    )
+    async with driver.session() as session:
+        await session.run(query, peer_id=peer_id, org_id=caller.org_id)
+    
+    await _broadcast(caller.org_id, caller)
+    return {"status": "ok"}
+
+
+@router.get("/{peer_id}/metrics")
+async def get_peer_metrics(
+    peer_id: str,
+    caller: CallerInfo = Depends(extract_auth),
+) -> dict:
+    """Proxy Prometheus metrics from the agent to the UI."""
+    driver = get_neo4j()
+    query = "MATCH (p:Peer {peer_id: $peer_id, org_id: $org_id}) RETURN p.api_url as api_url"
+    async with driver.session() as session:
+        result = await session.run(query, peer_id=peer_id, org_id=caller.org_id)
+        record = await result.single()
+        if not record:
+            raise HTTPException(404, "Peer not found")
+        api_url = record["api_url"]
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=True) as client:
+            # We fetch from the agent's /metrics/ endpoint (trailing slash often required by mount)
+            # Use rstrip('/') + '/metrics/' to ensure we don't end up with //
+            target_url = f"{api_url.rstrip('/')}/metrics/"
+            r = await client.get(target_url)
+            r.raise_for_status()
+            return {"raw": r.text}
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch metrics from agent: {str(e)}")
 
 
 @router.websocket("/watch")

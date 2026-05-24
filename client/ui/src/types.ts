@@ -6,6 +6,8 @@ export interface PeerInfo {
   last_seen: string;
   online: boolean;
   transport?: "udp" | "quic";
+  group: string;
+  org_id: string;
 }
 
 export interface FileMetadata {
