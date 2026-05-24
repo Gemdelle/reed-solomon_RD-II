@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -8,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+import config_store
 from config import get_settings
 from config_router import router as config_router
 from files.router import router as files_router
@@ -28,16 +31,17 @@ async def _heartbeat_loop() -> None:
     while True:
         await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
         settings = get_settings()
-        pid = token_store.get_peer_id() or settings.PEER_ID
+        pid = token_store.get_peer_id() or config_store.get("peer_id", settings.PEER_ID)
 
         async def _reregister() -> None:
             try:
-                transport = token_store.get_transport_mode() or settings.TRANSPORT_MODE
+                transport = token_store.get_transport_mode() or config_store.get("transport_mode", settings.TRANSPORT_MODE)
+                udp_host = config_store.get("udp_advertise_host", "") or _effective_advertise_host()
                 result = await server_client.register(
                     peer_id=pid,
-                    api_url=settings.AGENT_API_URL,
-                    udp_host=settings.udp_advertise_host,
-                    udp_port=settings.UDP_PORT,
+                    api_url=config_store.get("agent_api_url", "") or settings.AGENT_API_URL,
+                    udp_host=udp_host,
+                    udp_port=config_store.get("udp_port", settings.UDP_PORT),
                     transport=transport,
                 )
                 token_store.set_peer_id(result.get("peer_id", pid))
@@ -50,43 +54,71 @@ async def _heartbeat_loop() -> None:
         except httpx.HTTPStatusError as exc:
             consecutive_failures += 1
             if exc.response.status_code == 404:
-                # Peer expired from registry (server restart / long outage).
                 await _reregister()
                 consecutive_failures = 0
         except Exception:
             consecutive_failures += 1
-            # After 2+ consecutive transport failures the server likely restarted;
-            # attempt re-registration so we come back online as soon as it's up.
             if consecutive_failures >= 2:
                 await _reregister()
+
+
+def _effective_advertise_host() -> str:
+    import socket
+    stored = config_store.get("udp_advertise_host", "")
+    if stored:
+        return stored
+    udp_host = config_store.get("udp_host", "0.0.0.0")
+    if udp_host in ("0.0.0.0", "::"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except Exception:
+            return "127.0.0.1"
+    return udp_host
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    await db.init_db(settings.STORAGE_PATH)
+    config_store.load({
+        "server_url": settings.SERVER_URL,
+        "peer_id": settings.PEER_ID,
+        "agent_api_url": settings.AGENT_API_URL,
+        "udp_host": settings.UDP_HOST,
+        "udp_port": settings.UDP_PORT,
+        "udp_advertise_host": settings.UDP_ADVERTISE_HOST,
+        "transport_mode": settings.TRANSPORT_MODE,
+        "storage_path": settings.STORAGE_PATH,
+        "invite_token": settings.INVITE_TOKEN,
+        "network_hint": settings.NETWORK_HINT,
+    })
 
-    # Select and start the transport based on TRANSPORT_MODE env var.
-    if settings.TRANSPORT_MODE == "quic":
+    await db.init_db(config_store.get("storage_path"))
+
+    transport_mode = config_store.get("transport_mode", "udp")
+    if transport_mode == "quic":
         set_transport(QUICTransport())
     else:
         set_transport(UDPTransport())
-    await get_transport().start(settings.UDP_HOST, settings.UDP_PORT)
+    await get_transport().start(
+        config_store.get("udp_host", "0.0.0.0"),
+        config_store.get("udp_port", 9001),
+    )
 
-    # Only register at startup if a service/device token is configured.
-    # Desktop OIDC peers register after the UI pushes the JWT via POST /auth/token.
-    if settings.AGENT_SERVICE_TOKEN or settings.INVITE_TOKEN:
+    if settings.AGENT_SERVICE_TOKEN or config_store.get("invite_token", ""):
         try:
             result = await server_client.register(
-                peer_id=settings.PEER_ID,
-                api_url=settings.AGENT_API_URL,
-                udp_host=settings.udp_advertise_host,
-                udp_port=settings.UDP_PORT,
-                transport=settings.TRANSPORT_MODE,
+                peer_id=config_store.get("peer_id", settings.PEER_ID),
+                api_url=config_store.get("agent_api_url", "") or settings.AGENT_API_URL,
+                udp_host=_effective_advertise_host(),
+                udp_port=config_store.get("udp_port", settings.UDP_PORT),
+                transport=transport_mode,
             )
-            token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
+            token_store.set_peer_id(result.get("peer_id", config_store.get("peer_id", settings.PEER_ID)))
         except Exception:
             pass
+
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
     probe_task = asyncio.create_task(rtt_probe_loop())
     yield
@@ -114,12 +146,16 @@ app.include_router(transfers_router, prefix="/transfer", tags=["transfer"])
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
     settings = get_settings()
-    return {"status": "ok", "transport": token_store.get_transport_mode() or settings.TRANSPORT_MODE}
+    return {
+        "status": "ok",
+        "transport": token_store.get_transport_mode() or config_store.get("transport_mode", settings.TRANSPORT_MODE),
+        "udp_host": config_store.get("udp_host", settings.UDP_HOST),
+        "udp_port": config_store.get("udp_port", settings.UDP_PORT),
+    }
 
 
 @app.get("/auth/callback", tags=["auth"])
 async def auth_callback(code: str, state: str):
-    """Recibe el código desde el navegador externo."""
     _auth_store["last"] = {"code": code, "state": state}
     return HTMLResponse("""
         <html>
@@ -134,7 +170,6 @@ async def auth_callback(code: str, state: str):
 
 @app.get("/auth/poll", tags=["auth"])
 async def auth_poll():
-    """La UI llama aquí para ver si ya llegó el código."""
     return _auth_store.pop("last", None)
 
 
@@ -146,7 +181,6 @@ class TokenPayload(BaseModel):
 def _peer_id_from_jwt(token: str, fallback: str) -> str:
     try:
         import base64, json as _json
-        # Decode payload without verification (agent trusts the UI)
         parts = token.split(".")
         if len(parts) < 2:
             return fallback
@@ -159,22 +193,20 @@ def _peer_id_from_jwt(token: str, fallback: str) -> str:
 
 @app.post("/auth/token", tags=["auth"])
 async def push_token(body: TokenPayload):
-    """
-    UI pushes the OIDC access token (and server URL) here after login.
-    Agent stores them, derives peer_id from JWT claims, and registers.
-    """
     token_store.set_token(body.token)
     if body.server_url:
         token_store.set_server_url(body.server_url)
+        config_store.update({"server_url": body.server_url})
+        config_store.save()
     settings = get_settings()
-    peer_id = _peer_id_from_jwt(body.token, settings.PEER_ID)
+    peer_id = _peer_id_from_jwt(body.token, config_store.get("peer_id", settings.PEER_ID))
     try:
         result = await server_client.register(
             peer_id=peer_id,
-            api_url=settings.AGENT_API_URL,
-            udp_host=settings.udp_advertise_host,
-            udp_port=settings.UDP_PORT,
-            transport=settings.TRANSPORT_MODE,
+            api_url=config_store.get("agent_api_url", "") or settings.AGENT_API_URL,
+            udp_host=_effective_advertise_host(),
+            udp_port=config_store.get("udp_port", settings.UDP_PORT),
+            transport=config_store.get("transport_mode", settings.TRANSPORT_MODE),
         )
         token_store.set_peer_id(result.get("peer_id", peer_id))
     except Exception:

@@ -1,6 +1,7 @@
 import type {
   AgentConfig,
   AuthConfig,
+  ConfigUpdateResponse,
   DeviceTokenCreate,
   DeviceTokenInfo,
   FileMetadata,
@@ -193,12 +194,12 @@ export const agentApi = {
   getConfig: () =>
     fetch(`${getAgentUrl()}/config`).then((r) => json<AgentConfig>(r)),
 
-  setTransport: (mode: "udp" | "quic") =>
+  setConfig: (cfg: Partial<AgentConfig>) =>
     fetch(`${getAgentUrl()}/config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ transport_mode: mode }),
-    }).then((r) => json<{ ok: boolean; transport_mode: string }>(r)),
+      body: JSON.stringify(cfg),
+    }).then((r) => json<ConfigUpdateResponse>(r)),
 
   // Transport negotiation
   requestTransport: (targetPeerId: string, transport: "udp" | "quic") =>

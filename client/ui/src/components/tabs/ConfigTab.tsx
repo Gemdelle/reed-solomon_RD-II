@@ -29,21 +29,27 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
-export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
+const appVersion =
+  (import.meta as unknown as { env: Record<string, string> }).env.VITE_APP_VERSION ?? "1.1.0";
+
+export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
+  // Live health state
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
+
+  // Config form state
+  const [config, setConfig] = useState<AgentConfig | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [form, setForm] = useState<Partial<AgentConfig>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveResult, setSaveResult] = useState<{ ok: boolean; requires_restart: boolean } | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [showToken, setShowToken] = useState(false);
+
+  // Ping state
   const [pinging, setPinging] = useState(false);
   const [pingMs, setPingMs] = useState<number | null>(null);
   const [pingError, setPingError] = useState<string | null>(null);
-
-  // Transport switcher state
-  const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
-  const [selectedMode, setSelectedMode] = useState<"udp" | "quic">("udp");
-  const [applyingTransport, setApplyingTransport] = useState(false);
-  const [transportSuccess, setTransportSuccess] = useState<string | null>(null);
-  const [transportError, setTransportError] = useState<string | null>(null);
-
-  const appVersion = (import.meta as unknown as { env: Record<string, string> }).env.VITE_APP_VERSION ?? "1.1.0-beta.3";
 
   const loadHealth = useCallback(async () => {
     try {
@@ -60,25 +66,37 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
   }, [loadHealth]);
 
   useEffect(() => {
-    agentApi.getConfig().then((cfg) => {
-      setAgentConfig(cfg);
-      setSelectedMode(cfg.transport_mode);
-    }).catch(() => {});
+    agentApi
+      .getConfig()
+      .then((cfg) => {
+        setConfig(cfg);
+        setForm(cfg);
+      })
+      .catch((e) => setLoadError((e as Error).message));
   }, []);
 
-  async function handleApplyTransport() {
-    setApplyingTransport(true);
-    setTransportSuccess(null);
-    setTransportError(null);
+  function setField<K extends keyof AgentConfig>(key: K, val: AgentConfig[K]) {
+    setForm((prev) => ({ ...prev, [key]: val }));
+    setSaveResult(null);
+    setSaveError(null);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setSaveResult(null);
+    setSaveError(null);
     try {
-      const res = await agentApi.setTransport(selectedMode);
-      setTransportSuccess(`Transport actualizado a ${res.transport_mode.toUpperCase()}`);
-      setAgentConfig((prev) => prev ? { ...prev, transport_mode: selectedMode } : prev);
-      await loadHealth();
+      const res = await agentApi.setConfig(form);
+      setSaveResult({ ok: res.ok, requires_restart: res.requires_restart });
+      setConfig((prev) =>
+        prev
+          ? { ...prev, ...form, transport_mode: res.transport_mode as "udp" | "quic" }
+          : prev
+      );
     } catch (e) {
-      setTransportError((e as Error).message);
+      setSaveError((e as Error).message);
     } finally {
-      setApplyingTransport(false);
+      setSaving(false);
     }
   }
 
@@ -88,7 +106,7 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
     setPingError(null);
     const t0 = performance.now();
     try {
-      await serverApi.health(serverUrl);
+      await serverApi.health(form.server_url ?? _serverUrl);
       setPingMs(Math.round(performance.now() - t0));
     } catch (e) {
       setPingError((e as Error).message);
@@ -97,44 +115,80 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
     }
   }
 
-  const transport = (health as any)?.transport as string | undefined;
-  const transportBadge = transport
-    ? TRANSPORT_BADGE[transport.toLowerCase()] ?? TRANSPORT_BADGE.udp
+  const liveTransport = (health as HealthInfo | null)?.transport;
+  const transportBadge = liveTransport
+    ? TRANSPORT_BADGE[liveTransport.toLowerCase()] ?? TRANSPORT_BADGE.udp
     : null;
+
+  const inputClass =
+    "w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-500";
+  const labelClass = "text-xs text-slate-400 mb-1 block";
+  const sectionHeaderClass =
+    "text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3";
+  const sectionCardClass =
+    "bg-slate-800/40 rounded-lg border border-slate-700/50 p-4 space-y-3";
 
   return (
     <div className="space-y-4 overflow-auto h-full">
-      {/* Peer info */}
+      {loadError ? (
+        <p className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
+          Error al cargar la configuración: {loadError}
+        </p>
+      ) : null}
+
+      {/* Identidad */}
       <section>
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-          Peer
-        </h3>
-        <div className="bg-slate-800/40 rounded-lg border border-slate-700/50 p-4 space-y-2">
-          <InfoRow label="Peer ID">{peerId}</InfoRow>
-          <InfoRow label="Agent URL">{agentUrl}</InfoRow>
-          <InfoRow label="Server URL">{serverUrl}</InfoRow>
-          <InfoRow label="Version">{appVersion}</InfoRow>
+        <h3 className={sectionHeaderClass}>Identidad</h3>
+        <div className={sectionCardClass}>
+          <div>
+            <label className={labelClass} htmlFor="cfg-peer-id">Peer ID</label>
+            <input
+              id="cfg-peer-id"
+              type="text"
+              className={inputClass}
+              value={form.peer_id ?? ""}
+              onChange={(e) => setField("peer_id", e.target.value)}
+              disabled={!config}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass} htmlFor="cfg-agent-api-url">Agent API URL</label>
+            <input
+              id="cfg-agent-api-url"
+              type="text"
+              className={inputClass}
+              value={form.agent_api_url ?? ""}
+              onChange={(e) => setField("agent_api_url", e.target.value)}
+              placeholder="auto-detectado"
+              disabled={!config}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              URL de este agente registrada con el servidor. Vacío = auto-detectado.
+            </p>
+          </div>
+
+          <InfoRow label="Agent URL local">{agentUrl}</InfoRow>
+          <InfoRow label="Versión">{appVersion}</InfoRow>
         </div>
       </section>
 
-      {/* Transport + network */}
+      {/* Estado del agente (live health, display-only) */}
       <section>
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-          Agente
-        </h3>
-        <div className="bg-slate-800/40 rounded-lg border border-slate-700/50 p-4 space-y-2">
-          {healthError && (
+        <h3 className={sectionHeaderClass}>Agente</h3>
+        <div className={sectionCardClass}>
+          {healthError ? (
             <p className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
               {healthError}
             </p>
-          )}
+          ) : null}
 
           <div className="flex justify-between text-sm gap-4 items-center">
             <span className="text-slate-400 flex-shrink-0">Transport</span>
             <span>
-              {transportBadge && transport ? (
+              {transportBadge && liveTransport ? (
                 <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${transportBadge}`}>
-                  {transport.toUpperCase()}
+                  {liveTransport.toUpperCase()}
                 </span>
               ) : (
                 <span className="text-slate-500 font-mono text-sm">—</span>
@@ -143,136 +197,62 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
           </div>
 
           <InfoRow label="UDP Host">
-            {(health as any)?.udp_host ?? "—"}
+            {(health as HealthInfo | null)?.udp_host ?? "—"}
           </InfoRow>
           <InfoRow label="UDP Port">
-            {(health as any)?.udp_port != null ? String((health as any).udp_port) : "—"}
+            {(health as HealthInfo | null)?.udp_port != null
+              ? String((health as HealthInfo).udp_port)
+              : "—"}
           </InfoRow>
 
-          {/* QUIC hint when running in UDP mode */}
-          {transport === "udp" ? (
+          {liveTransport === "udp" ? (
             <div className="mt-2 flex items-start gap-2 bg-slate-800/40 border border-slate-700/50 rounded-lg px-3 py-2.5 text-xs text-slate-500">
-              <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              <svg
+                className="w-3.5 h-3.5 flex-shrink-0 mt-px text-slate-600"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
               <span>
-                Para habilitar QUIC/TLS, reiniciá el agente con{" "}
-                <code className="text-slate-400 bg-slate-800 rounded px-1">TRANSPORT_MODE=quic</code>
+                Para habilitar QUIC/TLS, cambiá el transport en la sección "Red P2P" y guardá.
               </span>
             </div>
           ) : null}
         </div>
       </section>
 
-      {/* Transport switcher */}
+      {/* Servidor */}
       <section>
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-          Transport
-        </h3>
-        <div className="bg-slate-800/40 rounded-lg border border-slate-700/50 p-4 space-y-3">
-          {/* Current mode badge */}
-          <div className="flex items-center justify-between text-sm gap-4">
-            <span className="text-slate-400 flex-shrink-0">Modo actual</span>
-            {agentConfig ? (
-              <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${
-                agentConfig.transport_mode === "quic"
-                  ? TRANSPORT_BADGE.quic
-                  : TRANSPORT_BADGE.udp
-              }`}>
-                {agentConfig.transport_mode.toUpperCase()}
-              </span>
-            ) : (
-              <span className="text-slate-500 font-mono text-sm">—</span>
-            )}
+        <h3 className={sectionHeaderClass}>Servidor</h3>
+        <div className={sectionCardClass}>
+          <div>
+            <label className={labelClass} htmlFor="cfg-server-url">Server URL</label>
+            <input
+              id="cfg-server-url"
+              type="text"
+              className={inputClass}
+              value={form.server_url ?? ""}
+              onChange={(e) => setField("server_url", e.target.value)}
+              disabled={!config}
+            />
           </div>
-
-          {/* Toggle buttons */}
-          <div className="flex gap-2">
-            {(["udp", "quic"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => {
-                  setSelectedMode(mode);
-                  setTransportSuccess(null);
-                  setTransportError(null);
-                }}
-                className={`flex-1 py-2 text-xs font-mono rounded-lg border transition-colors ${
-                  selectedMode === mode
-                    ? mode === "quic"
-                      ? "bg-violet-900/60 border-violet-700 text-violet-300"
-                      : "bg-slate-700 border-slate-600 text-slate-200"
-                    : "bg-slate-800/40 border-slate-700/50 text-slate-500 hover:text-slate-300 hover:border-slate-600"
-                }`}
-              >
-                {mode.toUpperCase()}
-              </button>
-            ))}
-          </div>
-
-          {/* QUIC warning when switching from UDP */}
-          {selectedMode === "quic" && agentConfig?.transport_mode === "udp" ? (
-            <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-800/50 rounded-lg px-3 py-2.5 text-xs text-amber-400">
-              <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-              <span>QUIC requiere certificados TLS. Asegurate de que el agente esté configurado con los certs correspondientes.</span>
-            </div>
-          ) : null}
-
-          {/* Apply button */}
-          <div className="flex items-center gap-3 pt-1">
-            <button
-              onClick={handleApplyTransport}
-              disabled={applyingTransport || selectedMode === agentConfig?.transport_mode}
-              className="text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-lg px-4 py-1.5 transition-colors flex items-center gap-2"
-            >
-              {applyingTransport ? (
-                <>
-                  <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
-                  </svg>
-                  Aplicando…
-                </>
-              ) : "Aplicar"}
-            </button>
-          </div>
-
-          {/* Success message */}
-          {transportSuccess ? (
-            <p className="text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-900 rounded-lg px-3 py-2">
-              {transportSuccess}
-            </p>
-          ) : null}
-
-          {/* Error message */}
-          {transportError ? (
-            <p className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
-              Error: {transportError}
-            </p>
-          ) : null}
-        </div>
-      </section>
-
-      {/* Server connection */}
-      <section>
-        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
-          Servidor
-        </h3>
-        <div className="bg-slate-800/40 rounded-lg border border-slate-700/50 p-4 space-y-3">
-          <InfoRow label="URL">{serverUrl}</InfoRow>
 
           <div className="flex items-center justify-between gap-4">
             <span className="text-sm text-slate-400">Latencia</span>
             <div className="flex items-center gap-3">
-              {pingMs !== null && (
+              {pingMs !== null ? (
                 <span className="text-sm font-mono text-emerald-400">{pingMs} ms</span>
-              )}
-              {pingError && (
+              ) : null}
+              {pingError ? (
                 <span className="text-xs text-red-400 font-mono">{pingError}</span>
-              )}
+              ) : null}
               <button
                 onClick={handlePing}
                 disabled={pinging}
@@ -284,6 +264,216 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
           </div>
         </div>
       </section>
+
+      {/* Red P2P */}
+      <section>
+        <h3 className={sectionHeaderClass}>Red P2P</h3>
+        <div className={sectionCardClass}>
+          {/* Transport toggle */}
+          <div>
+            <label className={labelClass}>Modo de transporte</label>
+            <div className="flex gap-2">
+              {(["udp", "quic"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={!config}
+                  onClick={() => {
+                    setField("transport_mode", mode);
+                  }}
+                  className={`flex-1 py-2 text-xs font-mono rounded-lg border transition-colors ${
+                    form.transport_mode === mode
+                      ? mode === "quic"
+                        ? "bg-violet-900/60 border-violet-700 text-violet-300"
+                        : "bg-slate-700 border-slate-600 text-slate-200"
+                      : "bg-slate-800/40 border-slate-700/50 text-slate-500 hover:text-slate-300 hover:border-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                  }`}
+                >
+                  {mode.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* QUIC warning */}
+          {form.transport_mode === "quic" ? (
+            <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-800/50 rounded-lg px-3 py-2.5 text-xs text-amber-400">
+              <svg
+                className="w-3.5 h-3.5 flex-shrink-0 mt-px"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              <span>
+                QUIC requiere certificados TLS. Asegurate de que el agente esté configurado con los certs correspondientes.
+              </span>
+            </div>
+          ) : null}
+
+          <div>
+            <label className={labelClass} htmlFor="cfg-udp-host">UDP Bind Host</label>
+            <input
+              id="cfg-udp-host"
+              type="text"
+              className={inputClass}
+              value={form.udp_host ?? ""}
+              onChange={(e) => setField("udp_host", e.target.value)}
+              placeholder="0.0.0.0"
+              disabled={!config}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass} htmlFor="cfg-udp-port">UDP Port</label>
+            <input
+              id="cfg-udp-port"
+              type="number"
+              className={inputClass}
+              value={form.udp_port ?? ""}
+              onChange={(e) => setField("udp_port", Number(e.target.value))}
+              disabled={!config}
+            />
+          </div>
+
+          <div>
+            <label className={labelClass} htmlFor="cfg-udp-advertise-host">Advertise Host</label>
+            <input
+              id="cfg-udp-advertise-host"
+              type="text"
+              className={inputClass}
+              value={form.udp_advertise_host ?? ""}
+              onChange={(e) => setField("udp_advertise_host", e.target.value)}
+              placeholder="auto-detectado"
+              disabled={!config}
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              IP que se anuncia a otros peers. Útil con VPN o multi-homed.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Almacenamiento */}
+      <section>
+        <h3 className={sectionHeaderClass}>Almacenamiento</h3>
+        <div className={sectionCardClass}>
+          <div>
+            <label className={labelClass} htmlFor="cfg-storage-path">Directorio de archivos</label>
+            <input
+              id="cfg-storage-path"
+              type="text"
+              className={inputClass}
+              value={form.storage_path ?? ""}
+              onChange={(e) => setField("storage_path", e.target.value)}
+              disabled={!config}
+            />
+          </div>
+          <span className="text-xs text-amber-400 bg-amber-950/30 border border-amber-800/50 rounded px-2 py-0.5 inline-flex items-center gap-1">
+            <svg
+              className="w-3 h-3 flex-shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Requiere reinicio para aplicar
+          </span>
+        </div>
+      </section>
+
+      {/* Acceso */}
+      <section>
+        <h3 className={sectionHeaderClass}>Acceso</h3>
+        <div className={sectionCardClass}>
+          <div>
+            <label className={labelClass} htmlFor="cfg-invite-token">Invite Token</label>
+            <div className="relative">
+              <input
+                id="cfg-invite-token"
+                type={showToken ? "text" : "password"}
+                className={`${inputClass} pr-10`}
+                value={form.invite_token ?? ""}
+                onChange={(e) => setField("invite_token", e.target.value)}
+                placeholder="token de acceso al servidor"
+                disabled={!config}
+              />
+              <button
+                type="button"
+                onClick={() => setShowToken((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors p-0.5"
+                aria-label={showToken ? "Ocultar token" : "Mostrar token"}
+              >
+                {showToken ? (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelClass} htmlFor="cfg-network-hint">Network Hint</label>
+            <input
+              id="cfg-network-hint"
+              type="text"
+              className={inputClass}
+              value={form.network_hint ?? ""}
+              onChange={(e) => setField("network_hint", e.target.value)}
+              disabled={!config}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Save banners */}
+      {saveResult ? (
+        saveResult.requires_restart ? (
+          <p className="text-xs text-amber-400 bg-amber-950/40 border border-amber-800 rounded-lg px-3 py-2">
+            Configuración guardada. Reiniciá el agente para aplicar todos los cambios.
+          </p>
+        ) : (
+          <p className="text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-900 rounded-lg px-3 py-2">
+            Configuración guardada.
+          </p>
+        )
+      ) : null}
+
+      {saveError ? (
+        <p className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
+          Error al guardar: {saveError}
+        </p>
+      ) : null}
+
+      {/* Save button */}
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving || !config}
+        className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg py-2.5 text-sm font-medium transition-colors"
+      >
+        {saving ? "Guardando…" : "Guardar configuración"}
+      </button>
     </div>
   );
 }

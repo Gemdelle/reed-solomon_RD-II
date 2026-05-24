@@ -86,10 +86,22 @@ export interface DeviceTokenInfo {
 }
 
 export interface AgentConfig {
-  transport_mode: "udp" | "quic";
+  server_url: string;
   peer_id: string;
+  agent_api_url: string;
   udp_host: string;
   udp_port: number;
+  udp_advertise_host: string;
+  transport_mode: "udp" | "quic";
+  storage_path: string;
+  invite_token: string;
+  network_hint: string;
+}
+
+export interface ConfigUpdateResponse {
+  ok: boolean;
+  requires_restart: boolean;
+  transport_mode: string;
 }
 
 export interface TransportRequest {

@@ -1,10 +1,9 @@
-"""
-HTTP client for the central RS Transfer Server.
-Handles peer registration, heartbeat, peer discovery, and metrics reporting.
-"""
+from __future__ import annotations
+
 import httpx
 
 import token_store
+import config_store as _config_store
 from config import get_settings
 
 _DEFAULT_REDUNDANCY = 0.25
@@ -36,11 +35,16 @@ class ServerClient:
             "api_url": api_url,
             "udp_host": udp_host,
             "udp_port": udp_port,
-            "network_hint": self._settings.NETWORK_HINT,
             "transport": transport,
         }
-        if self._settings.INVITE_TOKEN:
-            body["invite_token"] = self._settings.INVITE_TOKEN
+        try:
+            invite = _config_store.get("invite_token", "") or self._settings.INVITE_TOKEN
+            body["network_hint"] = _config_store.get("network_hint", self._settings.NETWORK_HINT)
+        except Exception:
+            invite = self._settings.INVITE_TOKEN
+            body["network_hint"] = self._settings.NETWORK_HINT
+        if invite:
+            body["invite_token"] = invite
         async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
             r = await c.post(
                 f"{self._base}/peers/register",

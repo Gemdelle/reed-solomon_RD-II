@@ -235,23 +235,28 @@ class TransportRequestBody(BaseModel):
 
 async def _switch_transport(mode: str) -> None:
     """Stop the current transport, start a new one, update token_store, re-register."""
+    import config_store
     settings = get_settings()
+    udp_host = config_store.get("udp_host", settings.UDP_HOST)
+    udp_port = config_store.get("udp_port", settings.UDP_PORT)
+
     old_transport = get_transport()
     new_transport = QUICTransport() if mode == "quic" else UDPTransport()
 
     old_transport.stop()
     set_transport(new_transport)
-    await new_transport.start(settings.UDP_HOST, settings.UDP_PORT)
+    await new_transport.start(udp_host, udp_port)
 
     token_store.set_transport_mode(mode)
 
-    pid = token_store.get_peer_id() or settings.PEER_ID
+    pid = token_store.get_peer_id() or config_store.get("peer_id", settings.PEER_ID)
     try:
+        advertise = config_store.get("udp_advertise_host", "") or settings.udp_advertise_host
         result = await server_client.register(
             peer_id=pid,
-            api_url=settings.AGENT_API_URL,
-            udp_host=settings.udp_advertise_host,
-            udp_port=settings.UDP_PORT,
+            api_url=config_store.get("agent_api_url", "") or settings.AGENT_API_URL,
+            udp_host=advertise,
+            udp_port=udp_port,
             transport=mode,
         )
         token_store.set_peer_id(result.get("peer_id", pid))
