@@ -1,3 +1,10 @@
+# [1.1.0-beta.5](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.4...v1.1.0-beta.5) (2026-05-24)
+
+
+### Features
+
+* peer liveness — offline/unknown states instead of disappearing ([62a469d](https://github.com/Gemdelle/reed-solomon_RD-II/commit/62a469dfdf1890bfc303e02bbf8286a2c4699f3d))
+
 # [1.1.0-beta.4](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.3...v1.1.0-beta.4) (2026-05-24)
 
 
