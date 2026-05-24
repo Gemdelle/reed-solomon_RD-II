@@ -1,3 +1,10 @@
+# [1.1.0-beta.7](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.6...v1.1.0-beta.7) (2026-05-24)
+
+
+### Features
+
+* full agent config from UI — no .env needed for data plane ([fbcb570](https://github.com/Gemdelle/reed-solomon_RD-II/commit/fbcb5702c07f7b88b47afbb477244225e48132fc))
+
 # [1.1.0-beta.6](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.5...v1.1.0-beta.6) (2026-05-24)
 
 
