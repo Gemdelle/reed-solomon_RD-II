@@ -6,6 +6,7 @@ import PeerList from "../components/PeerList";
 import TransferDialog from "../components/TransferDialog";
 import AdminPanel from "../components/AdminPanel";
 import IncomingConnectionsBanner from "../components/IncomingConnectionsBanner";
+import TransportRequestBanner from "../components/TransportRequestBanner";
 import TitleBar from "../components/TitleBar";
 import TopBar from "../components/TopBar";
 import ErrorPage from "./ErrorPage";
@@ -206,6 +207,7 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
               <div className="flex-1 flex flex-col gap-4 min-w-0">
                 <PeerList peers={peers} currentPeerId={config.peerId} onSend={handleSendFromPeer} />
                 <IncomingConnectionsBanner />
+                <TransportRequestBanner />
               </div>
             </div>
           )}

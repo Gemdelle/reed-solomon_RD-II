@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { AgentConfig } from "../../types";
 import { agentApi, serverApi } from "../../api";
 
 interface Props {
@@ -35,6 +36,13 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
   const [pingMs, setPingMs] = useState<number | null>(null);
   const [pingError, setPingError] = useState<string | null>(null);
 
+  // Transport switcher state
+  const [agentConfig, setAgentConfig] = useState<AgentConfig | null>(null);
+  const [selectedMode, setSelectedMode] = useState<"udp" | "quic">("udp");
+  const [applyingTransport, setApplyingTransport] = useState(false);
+  const [transportSuccess, setTransportSuccess] = useState<string | null>(null);
+  const [transportError, setTransportError] = useState<string | null>(null);
+
   const appVersion = (import.meta as unknown as { env: Record<string, string> }).env.VITE_APP_VERSION ?? "1.1.0-beta.3";
 
   const loadHealth = useCallback(async () => {
@@ -50,6 +58,29 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
   useEffect(() => {
     loadHealth();
   }, [loadHealth]);
+
+  useEffect(() => {
+    agentApi.getConfig().then((cfg) => {
+      setAgentConfig(cfg);
+      setSelectedMode(cfg.transport_mode);
+    }).catch(() => {});
+  }, []);
+
+  async function handleApplyTransport() {
+    setApplyingTransport(true);
+    setTransportSuccess(null);
+    setTransportError(null);
+    try {
+      const res = await agentApi.setTransport(selectedMode);
+      setTransportSuccess(`Transport actualizado a ${res.transport_mode.toUpperCase()}`);
+      setAgentConfig((prev) => prev ? { ...prev, transport_mode: selectedMode } : prev);
+      await loadHealth();
+    } catch (e) {
+      setTransportError((e as Error).message);
+    } finally {
+      setApplyingTransport(false);
+    }
+  }
 
   async function handlePing() {
     setPinging(true);
@@ -129,6 +160,98 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
                 <code className="text-slate-400 bg-slate-800 rounded px-1">TRANSPORT_MODE=quic</code>
               </span>
             </div>
+          ) : null}
+        </div>
+      </section>
+
+      {/* Transport switcher */}
+      <section>
+        <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+          Transport
+        </h3>
+        <div className="bg-slate-800/40 rounded-lg border border-slate-700/50 p-4 space-y-3">
+          {/* Current mode badge */}
+          <div className="flex items-center justify-between text-sm gap-4">
+            <span className="text-slate-400 flex-shrink-0">Modo actual</span>
+            {agentConfig ? (
+              <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${
+                agentConfig.transport_mode === "quic"
+                  ? TRANSPORT_BADGE.quic
+                  : TRANSPORT_BADGE.udp
+              }`}>
+                {agentConfig.transport_mode.toUpperCase()}
+              </span>
+            ) : (
+              <span className="text-slate-500 font-mono text-sm">—</span>
+            )}
+          </div>
+
+          {/* Toggle buttons */}
+          <div className="flex gap-2">
+            {(["udp", "quic"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => {
+                  setSelectedMode(mode);
+                  setTransportSuccess(null);
+                  setTransportError(null);
+                }}
+                className={`flex-1 py-2 text-xs font-mono rounded-lg border transition-colors ${
+                  selectedMode === mode
+                    ? mode === "quic"
+                      ? "bg-violet-900/60 border-violet-700 text-violet-300"
+                      : "bg-slate-700 border-slate-600 text-slate-200"
+                    : "bg-slate-800/40 border-slate-700/50 text-slate-500 hover:text-slate-300 hover:border-slate-600"
+                }`}
+              >
+                {mode.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {/* QUIC warning when switching from UDP */}
+          {selectedMode === "quic" && agentConfig?.transport_mode === "udp" ? (
+            <div className="flex items-start gap-2 bg-amber-950/30 border border-amber-800/50 rounded-lg px-3 py-2.5 text-xs text-amber-400">
+              <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <span>QUIC requiere certificados TLS. Asegurate de que el agente esté configurado con los certs correspondientes.</span>
+            </div>
+          ) : null}
+
+          {/* Apply button */}
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              onClick={handleApplyTransport}
+              disabled={applyingTransport || selectedMode === agentConfig?.transport_mode}
+              className="text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed text-slate-300 rounded-lg px-4 py-1.5 transition-colors flex items-center gap-2"
+            >
+              {applyingTransport ? (
+                <>
+                  <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
+                  </svg>
+                  Aplicando…
+                </>
+              ) : "Aplicar"}
+            </button>
+          </div>
+
+          {/* Success message */}
+          {transportSuccess ? (
+            <p className="text-xs text-emerald-400 bg-emerald-950/40 border border-emerald-900 rounded-lg px-3 py-2">
+              {transportSuccess}
+            </p>
+          ) : null}
+
+          {/* Error message */}
+          {transportError ? (
+            <p className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
+              Error: {transportError}
+            </p>
           ) : null}
         </div>
       </section>

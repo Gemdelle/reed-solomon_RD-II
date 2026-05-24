@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from config import get_settings
+from config_router import router as config_router
 from files.router import router as files_router
 from metrics.probe import rtt_probe_loop
 from peers.router import router as peers_router
@@ -31,12 +32,13 @@ async def _heartbeat_loop() -> None:
 
         async def _reregister() -> None:
             try:
+                transport = token_store.get_transport_mode() or settings.TRANSPORT_MODE
                 result = await server_client.register(
                     peer_id=pid,
                     api_url=settings.AGENT_API_URL,
                     udp_host=settings.udp_advertise_host,
                     udp_port=settings.UDP_PORT,
-                    transport=settings.TRANSPORT_MODE,
+                    transport=transport,
                 )
                 token_store.set_peer_id(result.get("peer_id", pid))
             except Exception:
@@ -103,6 +105,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(config_router, prefix="/config", tags=["config"])
 app.include_router(files_router, prefix="/files", tags=["files"])
 app.include_router(peers_router, prefix="/peers", tags=["peers"])
 app.include_router(transfers_router, prefix="/transfer", tags=["transfer"])
@@ -111,7 +114,7 @@ app.include_router(transfers_router, prefix="/transfer", tags=["transfer"])
 @app.get("/health", tags=["meta"])
 async def health() -> dict:
     settings = get_settings()
-    return {"status": "ok", "transport": settings.TRANSPORT_MODE}
+    return {"status": "ok", "transport": token_store.get_transport_mode() or settings.TRANSPORT_MODE}
 
 
 @app.get("/auth/callback", tags=["auth"])

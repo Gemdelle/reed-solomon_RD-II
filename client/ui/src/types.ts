@@ -84,3 +84,18 @@ export interface DeviceTokenInfo {
   token_preview: string;
   token?: string | null; // solo presente en la respuesta de creación
 }
+
+export interface AgentConfig {
+  transport_mode: "udp" | "quic";
+  peer_id: string;
+  udp_host: string;
+  udp_port: number;
+}
+
+export interface TransportRequest {
+  request_id: string;
+  sender_peer_id: string;
+  requested_transport: "udp" | "quic";
+  status: "pending" | "accepted" | "rejected";
+  arrived_at: string;
+}

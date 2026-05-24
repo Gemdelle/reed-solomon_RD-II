@@ -1,14 +1,19 @@
 import asyncio
 import time
+import uuid
+from datetime import datetime, timezone
+from typing import Literal
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from pydantic import BaseModel
 
+import token_store
 from config import get_settings
 from rs.decoder import decode_transfer
 from rs.encoder import encode_file
 from rs.models import TransferStatus
-from rs.transport import QUICTransport, get_transport
+from rs.transport import QUICTransport, UDPTransport, get_transport, set_transport
 from server_client import server_client
 from storage.db import insert_transfer, list_history
 from storage.store import FileStorage
@@ -17,6 +22,7 @@ from transfers.models import HistoryEntry, IncomingConnection, ReceiveRequest, S
 router = APIRouter()
 
 _transfers: dict[str, dict] = {}
+_transport_requests: dict[str, dict] = {}
 
 
 @router.post("/send", response_model=TransferResult)
@@ -218,6 +224,120 @@ async def get_history(limit: int = 50) -> list[HistoryEntry]:
 @router.get("/", response_model=list[TransferResult])
 async def list_transfers() -> list[TransferResult]:
     return [TransferResult(**v) for v in _transfers.values()]
+
+
+# ── Transport negotiation ─────────────────────────────────────────────────────
+
+class TransportRequestBody(BaseModel):
+    sender_peer_id: str
+    requested_transport: Literal["udp", "quic"]
+
+
+async def _switch_transport(mode: str) -> None:
+    """Stop the current transport, start a new one, update token_store, re-register."""
+    settings = get_settings()
+    old_transport = get_transport()
+    new_transport = QUICTransport() if mode == "quic" else UDPTransport()
+
+    old_transport.stop()
+    set_transport(new_transport)
+    await new_transport.start(settings.UDP_HOST, settings.UDP_PORT)
+
+    token_store.set_transport_mode(mode)
+
+    pid = token_store.get_peer_id() or settings.PEER_ID
+    try:
+        result = await server_client.register(
+            peer_id=pid,
+            api_url=settings.AGENT_API_URL,
+            udp_host=settings.udp_advertise_host,
+            udp_port=settings.UDP_PORT,
+            transport=mode,
+        )
+        token_store.set_peer_id(result.get("peer_id", pid))
+    except Exception:
+        pass
+
+
+@router.post("/transport-request")
+async def receive_transport_request(body: TransportRequestBody) -> dict:
+    """Called by a remote peer's sender to ask us to switch transport."""
+    req_id = str(uuid.uuid4())
+    _transport_requests[req_id] = {
+        "request_id": req_id,
+        "sender_peer_id": body.sender_peer_id,
+        "requested_transport": body.requested_transport,
+        "arrived_at": datetime.now(timezone.utc).isoformat(),
+        "status": "pending",
+    }
+    return {"request_id": req_id}
+
+
+@router.get("/transport-requests")
+async def list_transport_requests() -> list[dict]:
+    """Return all pending transport-switch requests."""
+    return list(_transport_requests.values())
+
+
+@router.post("/transport-requests/{req_id}/accept")
+async def accept_transport_request(req_id: str) -> dict:
+    """Accept a transport-switch request, switch transport, and re-register."""
+    req = _transport_requests.get(req_id)
+    if req is None:
+        raise HTTPException(404, "Transport request not found")
+
+    mode = req["requested_transport"]
+
+    try:
+        await _switch_transport(mode)
+    except Exception as exc:
+        raise HTTPException(500, f"Failed to switch transport to {mode!r}: {exc}")
+
+    del _transport_requests[req_id]
+    return {"ok": True, "transport_mode": mode}
+
+
+@router.post("/transport-requests/{req_id}/reject")
+async def reject_transport_request(req_id: str) -> dict:
+    """Reject a transport-switch request without switching."""
+    _transport_requests.pop(req_id, None)
+    return {"ok": True}
+
+
+@router.post("/request-transport")
+async def request_transport_from_peer(
+    target_peer_id: str,
+    requested_transport: str,
+) -> dict:
+    """Ask a remote peer (via their agent API) to switch transport."""
+    settings = get_settings()
+    effective_pid = token_store.get_peer_id() or settings.PEER_ID
+
+    try:
+        peer = await server_client.get_peer(target_peer_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+    api_url: str = peer["api_url"]
+
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        try:
+            r = await client.post(
+                f"{api_url}/transfer/transport-request",
+                json={
+                    "sender_peer_id": effective_pid,
+                    "requested_transport": requested_transport,
+                },
+            )
+            r.raise_for_status()
+            return r.json()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                502,
+                f"Remote peer returned {exc.response.status_code}: {exc.response.text}",
+            )
+        except httpx.RequestError as exc:
+            raise HTTPException(502, f"Cannot reach peer {target_peer_id!r}: {exc}")
 
 
 # ── Incoming QUIC connection management ───────────────────────────────────────

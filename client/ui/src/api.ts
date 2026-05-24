@@ -1,4 +1,5 @@
 import type {
+  AgentConfig,
   AuthConfig,
   DeviceTokenCreate,
   DeviceTokenInfo,
@@ -9,6 +10,7 @@ import type {
   RecommendationResponse,
   ScopeConfig,
   TransferResult,
+  TransportRequest,
 } from "./types";
 
 declare global {
@@ -185,5 +187,38 @@ export const agentApi = {
     fetch(`${getAgentUrl()}/transfer/incoming/${transferId}/reject`, {
       method: "POST",
       headers: authHeaders(),
+    }).then((r) => json<{ ok: boolean }>(r)),
+
+  // Config
+  getConfig: () =>
+    fetch(`${getAgentUrl()}/config`).then((r) => json<AgentConfig>(r)),
+
+  setTransport: (mode: "udp" | "quic") =>
+    fetch(`${getAgentUrl()}/config`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transport_mode: mode }),
+    }).then((r) => json<{ ok: boolean; transport_mode: string }>(r)),
+
+  // Transport negotiation
+  requestTransport: (targetPeerId: string, transport: "udp" | "quic") =>
+    fetch(
+      `${getAgentUrl()}/transfer/request-transport?target_peer_id=${encodeURIComponent(targetPeerId)}&requested_transport=${transport}`,
+      { method: "POST" }
+    ).then((r) => json<{ request_id: string }>(r)),
+
+  listTransportRequests: () =>
+    fetch(`${getAgentUrl()}/transfer/transport-requests`).then(
+      (r) => json<TransportRequest[]>(r)
+    ),
+
+  acceptTransportRequest: (reqId: string) =>
+    fetch(`${getAgentUrl()}/transfer/transport-requests/${reqId}/accept`, {
+      method: "POST",
+    }).then((r) => json<{ ok: boolean; transport_mode: string }>(r)),
+
+  rejectTransportRequest: (reqId: string) =>
+    fetch(`${getAgentUrl()}/transfer/transport-requests/${reqId}/reject`, {
+      method: "POST",
     }).then((r) => json<{ ok: boolean }>(r)),
 };

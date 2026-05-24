@@ -41,6 +41,9 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<TransferResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [requestingTransport, setRequestingTransport] = useState(false);
+  const [transportRequestSent, setTransportRequestSent] = useState(false);
+  const [transportRequestError, setTransportRequestError] = useState<string | null>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Load files
@@ -84,6 +87,19 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
     if (recommendation) {
       setRedundancy(recommendation.redundancy_level);
       setUserOverride(false);
+    }
+  }
+
+  async function handleRequestTransport() {
+    setRequestingTransport(true);
+    setTransportRequestError(null);
+    try {
+      await agentApi.requestTransport(peer.peer_id, transport);
+      setTransportRequestSent(true);
+    } catch (e) {
+      setTransportRequestError((e as Error).message);
+    } finally {
+      setRequestingTransport(false);
     }
   }
 
@@ -181,7 +197,11 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                       <button
                         key={t}
                         type="button"
-                        onClick={() => setTransport(t)}
+                        onClick={() => {
+                          setTransport(t);
+                          setTransportRequestSent(false);
+                          setTransportRequestError(null);
+                        }}
                         className={`flex-1 py-2 text-xs font-mono rounded-lg border transition-colors cursor-pointer ${
                           isSelected
                             ? t === "quic"
@@ -201,16 +221,37 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
 
                 {/* Mismatch warning */}
                 {transport !== (peer.transport ?? "udp") ? (
-                  <div className="mt-2 flex items-start gap-2 bg-amber-950/30 border border-amber-800/50 rounded-lg px-3 py-2 text-xs text-amber-400">
-                    <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                    </svg>
-                    <span>
-                      El peer está registrado como <span className="font-mono">{(peer.transport ?? "udp").toUpperCase()}</span>.
-                      Para usar {transport.toUpperCase()}, el agente remoto debe iniciarse con{" "}
-                      <code className="text-amber-300">TRANSPORT_MODE={transport}</code>.
-                    </span>
+                  <div className="mt-2 bg-amber-950/30 border border-amber-800/50 rounded-lg px-3 py-2 text-xs text-amber-400 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                      </svg>
+                      {transportRequestSent ? (
+                        <span className="text-amber-300">
+                          Solicitud enviada — esperá que el peer acepte.
+                        </span>
+                      ) : (
+                        <span>
+                          El peer está registrado como <span className="font-mono">{(peer.transport ?? "udp").toUpperCase()}</span>.
+                          Para usar {transport.toUpperCase()}, el agente remoto debe iniciarse con{" "}
+                          <code className="text-amber-300">TRANSPORT_MODE={transport}</code>.
+                        </span>
+                      )}
+                    </div>
+                    {transportRequestError ? (
+                      <p className="text-red-400">{transportRequestError}</p>
+                    ) : null}
+                    {!transportRequestSent ? (
+                      <button
+                        type="button"
+                        onClick={handleRequestTransport}
+                        disabled={requestingTransport}
+                        className="bg-amber-800/60 hover:bg-amber-700/60 disabled:opacity-40 text-amber-200 border border-amber-700/50 rounded-lg px-3 py-1.5 text-xs transition-colors"
+                      >
+                        {requestingTransport ? "Enviando…" : "Solicitar cambio"}
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
 
