@@ -1,3 +1,10 @@
+# [1.1.0-beta.4](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.3...v1.1.0-beta.4) (2026-05-24)
+
+
+### Features
+
+* UI overhaul — frameless window, OIDC user profile, expandable sidebar, inline admin ([38ab038](https://github.com/Gemdelle/reed-solomon_RD-II/commit/38ab0384aaf653fe8d0ed67e834bc47997300a01))
+
 # [1.1.0-beta.3](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.2...v1.1.0-beta.3) (2026-05-23)
 
 
