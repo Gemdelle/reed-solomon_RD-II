@@ -17,6 +17,10 @@ declare global {
       baseUrl: string;
       openExternal?: (url: string) => void;
       onOidcCallback?: (callback: (url: string) => void) => void;
+      winMinimize?: () => void;
+      winMaximize?: () => void;
+      winClose?: () => void;
+      onMaximizeChange?: (callback: (isMaximized: boolean) => void) => void;
     };
   }
 }
@@ -148,7 +152,7 @@ export const agentApi = {
     ),
 
   // Transfers
-  sendFile: (fileId: string, targetPeerId: string, redundancyLevel?: number) =>
+  sendFile: (fileId: string, targetPeerId: string, redundancyLevel?: number, transport?: "udp" | "quic") =>
     fetch(`${getAgentUrl()}/transfer/send`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
@@ -156,6 +160,7 @@ export const agentApi = {
         file_id: fileId,
         target_peer_id: targetPeerId,
         redundancy_level: redundancyLevel ?? null,
+        transport: transport ?? null,
       }),
     }).then((r) => json<TransferResult>(r)),
 

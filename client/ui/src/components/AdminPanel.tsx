@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { serverApi, getServerUrl } from "../api";
 import type { DeviceTokenInfo } from "../types";
 
-interface Props {
-  onClose: () => void;
-}
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+interface Props {}
 
 type Tab = "scopes" | "invites" | "device-tokens";
 
@@ -518,56 +517,39 @@ const TAB_LABELS: Record<Tab, string> = {
   "device-tokens": "Device Tokens",
 };
 
-export default function AdminPanel({ onClose }: Props) {
+export default function AdminPanel(_props: Props) {
   const [tab, setTab] = useState<Tab>("device-tokens");
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-          <h2 className="text-sm font-semibold text-slate-200">Panel de administración</h2>
+    <div className="flex flex-col h-full">
+      {/* Page header */}
+      <div className="px-5 py-4 border-b border-slate-800 flex-shrink-0">
+        <h2 className="text-sm font-semibold text-slate-200">Administración</h2>
+        <p className="text-xs text-slate-500 mt-0.5">Gestión de accesos, grupos y tokens del servidor</p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-slate-800 overflow-x-auto flex-shrink-0">
+        {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
           <button
-            onClick={onClose}
-            className="text-slate-500 hover:text-slate-300 text-lg leading-none transition-colors"
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-5 py-3 text-xs font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
+              tab === t
+                ? "border-brand-500 text-brand-400"
+                : "border-transparent text-slate-500 hover:text-slate-300"
+            }`}
           >
-            ✕
+            {TAB_LABELS[t]}
           </button>
-        </div>
+        ))}
+      </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-slate-800 overflow-x-auto">
-          {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-2.5 text-xs font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${
-                tab === t
-                  ? "border-brand-500 text-brand-400"
-                  : "border-transparent text-slate-500 hover:text-slate-300"
-              }`}
-            >
-              {TAB_LABELS[t]}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-auto px-5 py-4">
-          {tab === "scopes" && <ScopesTab />}
-          {tab === "invites" && <InvitesTab />}
-          {tab === "device-tokens" && <DeviceTokensTab />}
-        </div>
-
-        {/* Footer */}
-        <div className="flex justify-end px-5 py-3 border-t border-slate-800">
-          <button
-            onClick={onClose}
-            className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
-          >
-            Cerrar
-          </button>
-        </div>
+      {/* Content */}
+      <div className="flex-1 overflow-auto px-5 py-5 max-w-2xl">
+        {tab === "scopes" && <ScopesTab />}
+        {tab === "invites" && <InvitesTab />}
+        {tab === "device-tokens" && <DeviceTokensTab />}
       </div>
     </div>
   );

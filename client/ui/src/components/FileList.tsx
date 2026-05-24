@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FileMetadata, PeerInfo } from "../types";
-import { agentApi } from "../api";
+import { agentApi, getAgentUrl } from "../api";
 
 interface Props {
   peers: PeerInfo[];
@@ -133,6 +133,14 @@ export default function FileList({ peers, onSend }: Props) {
                       </button>
                     )
                   ) : null}
+                  <a
+                    href={`${getAgentUrl()}/files/${file.file_id}`}
+                    download={file.filename}
+                    className="text-xs text-slate-600 hover:text-slate-300 transition-colors px-1"
+                    title="Descargar"
+                  >
+                    ↓
+                  </a>
                   <button
                     onClick={() => deleteFile(file.file_id)}
                     className="text-xs text-slate-600 hover:text-red-400 transition-colors px-1"

@@ -24,6 +24,7 @@ class SendRequest(BaseModel):
     file_id: str
     target_peer_id: str
     redundancy_level: float | None = None  # None → server recommendation
+    transport: Literal["udp", "quic"] | None = None
 
     @field_validator("redundancy_level")
     @classmethod
@@ -40,6 +41,7 @@ class ReceiveRequest(BaseModel):
     n: int
     k: int
     chunk_size: int
+    filename: str = ""
     timeout: float = 30.0
 
 

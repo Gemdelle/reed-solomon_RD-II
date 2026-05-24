@@ -37,6 +37,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
   const [adaptive, setAdaptive] = useState(true);
   const [redundancy, setRedundancy] = useState(0.25);
   const [userOverride, setUserOverride] = useState(false);
+  const [transport, setTransport] = useState<"udp" | "quic">(peer.transport ?? "udp");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<TransferResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +66,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
     try {
       // adaptive=true → null means "let the server decide" (agent uses its own recommendation call)
       const level = adaptive ? undefined : redundancy;
-      const res = await agentApi.sendFile(selectedFile.file_id, peer.peer_id, level);
+      const res = await agentApi.sendFile(selectedFile.file_id, peer.peer_id, level, transport);
       setResult(res);
     } catch (e) {
       setError((e as Error).message);
@@ -123,9 +124,17 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                 {result.status}
               </p>
               {result.status === "degraded" && (
-                <p className="text-xs text-slate-400 mt-1">
-                  RS recuperó {result.recovered_blocks}/{result.total_blocks} bloques
-                </p>
+                <>
+                  <p className="text-xs text-slate-400 mt-1">
+                    RS recuperó {result.recovered_blocks}/{result.total_blocks} bloques
+                  </p>
+                  <div className="mt-3 flex items-start gap-2 bg-yellow-950/30 border border-yellow-800/50 rounded-lg px-3 py-2.5 text-xs text-yellow-300 text-left">
+                    <span className="flex-shrink-0">⚠️</span>
+                    <span>
+                      Fue exitoso — RS recuperó {result.recovered_blocks}/{result.total_blocks} bloques
+                    </span>
+                  </div>
+                </>
               )}
               {result.reason && (
                 <p className="text-xs text-slate-500 mt-1">{result.reason}</p>
@@ -157,6 +166,54 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                       </option>
                     ))}
                   </select>
+                )}
+              </div>
+
+              {/* ── Transport ── */}
+              <div>
+                <label className="block text-xs text-slate-400 mb-2">Transport</label>
+                <div className="flex gap-2">
+                  {(["udp", "quic"] as const).map((t) => {
+                    const peerTransport = peer.transport ?? "udp";
+                    const isSupported = peerTransport === t;
+                    const isSelected = transport === t;
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => isSupported && setTransport(t)}
+                        disabled={!isSupported}
+                        title={!isSupported ? "El peer no soporta este transporte" : undefined}
+                        className={`flex-1 py-2 text-xs font-mono rounded-lg border transition-colors ${
+                          isSelected
+                            ? t === "quic"
+                              ? "bg-violet-900/60 border-violet-700 text-violet-300"
+                              : "bg-slate-700 border-slate-600 text-slate-200"
+                            : "bg-slate-800/40 border-slate-700/50 text-slate-500"
+                        } ${!isSupported ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                      >
+                        {t.toUpperCase()}
+                        {isSupported && (
+                          <span className="ml-1 text-slate-500 font-sans normal-case">
+                            (recomendado)
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {transport === "quic" && (
+                  <div className="mt-3 flex items-start gap-2 bg-violet-950/30 border border-violet-800/50 rounded-lg px-3 py-2.5 text-xs text-violet-300">
+                    <span className="flex-shrink-0 mt-px">ℹ️</span>
+                    <div>
+                      <p className="font-medium mb-0.5">Negociación QUIC/TLS</p>
+                      <p className="text-violet-400/80">
+                        El receptor deberá aprobar tu certificado antes de que los datos se transfieran.
+                        Asegurate de que el peer tenga la app abierta.
+                      </p>
+                    </div>
+                  </div>
                 )}
               </div>
 

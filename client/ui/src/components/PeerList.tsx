@@ -26,9 +26,11 @@ export default function PeerList({ peers, currentPeerId, onSend }: Props) {
     <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <h2 className="text-sm font-medium text-slate-200">Peers de la red</h2>
-        <span className="text-xs text-slate-500">
-          {online.length} online · {offline.length} offline
-        </span>
+        {peers.length > 0 ? (
+          <span className="text-xs text-slate-500">
+            {online.length} online · {offline.length} offline
+          </span>
+        ) : null}
       </div>
 
       {peers.length === 0 ? (

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     AGENT_PORT: int = 8000
     UDP_HOST: str = "0.0.0.0"
     UDP_PORT: int = 9001
+    # Explicit advertise address for VPN / multi-homed setups.
+    # If empty, auto-detected from the default route.
+    UDP_ADVERTISE_HOST: str = ""
     STORAGE_PATH: str = _default_storage_path()
     NETWORK_HINT: str = "auto"
     AGENT_SERVICE_TOKEN: str = ""
@@ -44,6 +47,15 @@ class Settings(BaseSettings):
         if not self.AGENT_API_URL:
             self.AGENT_API_URL = f"http://{_detect_local_ip()}:{self.AGENT_PORT}"
         return self
+
+    @property
+    def udp_advertise_host(self) -> str:
+        """Routable IP to register for UDP — explicit override wins, then auto-detect."""
+        if self.UDP_ADVERTISE_HOST:
+            return self.UDP_ADVERTISE_HOST
+        if self.UDP_HOST in ("0.0.0.0", "::"):
+            return _detect_local_ip()
+        return self.UDP_HOST
 
 
 @lru_cache

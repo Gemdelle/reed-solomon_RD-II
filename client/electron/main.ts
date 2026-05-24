@@ -12,6 +12,13 @@ ipcMain.on("open-external", (_event, url) => {
   shell.openExternal(url);
 });
 
+ipcMain.on("win-minimize", () => mainWindow?.minimize());
+ipcMain.on("win-maximize", () => {
+  if (mainWindow?.isMaximized()) mainWindow?.unmaximize();
+  else mainWindow?.maximize();
+});
+ipcMain.on("win-close", () => mainWindow?.close());
+
 function resolveAgent(): { cmd: string; args: string[]; cwd: string } {
   if (app.isPackaged) {
     const ext = process.platform === "win32" ? ".exe" : "";
@@ -64,6 +71,8 @@ function createWindow(): void {
     height: 800,
     show: false,
     title: "RockDove",
+    frame: false,
+    titleBarStyle: "hidden",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -108,6 +117,8 @@ if (!gotTheLock) {
       console.error("[main]", err);
     }
     createWindow();
+    mainWindow?.on("maximize", () => mainWindow?.webContents.send("win-maximized", true));
+    mainWindow?.on("unmaximize", () => mainWindow?.webContents.send("win-maximized", false));
   });
 }
 

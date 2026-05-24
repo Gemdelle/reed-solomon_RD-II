@@ -41,7 +41,7 @@ class ServerClient:
         }
         if self._settings.INVITE_TOKEN:
             body["invite_token"] = self._settings.INVITE_TOKEN
-        async with httpx.AsyncClient(timeout=10) as c:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
             r = await c.post(
                 f"{self._base}/peers/register",
                 json=body,
@@ -51,7 +51,7 @@ class ServerClient:
             return r.json()
 
     async def heartbeat(self, peer_id: str) -> None:
-        async with httpx.AsyncClient(timeout=5) as c:
+        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
             r = await c.post(
                 f"{self._base}/peers/{peer_id}/heartbeat",
                 headers=self._auth_headers,
@@ -59,13 +59,13 @@ class ServerClient:
             r.raise_for_status()
 
     async def get_peers(self) -> list[dict]:
-        async with httpx.AsyncClient(timeout=10) as c:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
             r = await c.get(f"{self._base}/peers", headers=self._auth_headers)
             r.raise_for_status()
             return r.json()
 
     async def get_peer(self, peer_id: str) -> dict:
-        async with httpx.AsyncClient(timeout=10) as c:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
             r = await c.get(f"{self._base}/peers/{peer_id}", headers=self._auth_headers)
             if r.status_code == 404:
                 raise ValueError(f"Peer {peer_id!r} not found on server")
@@ -75,7 +75,7 @@ class ServerClient:
     async def report_metrics(
         self, peer_id: str, rtt_ms: float, jitter_ms: float, loss_rate: float
     ) -> None:
-        async with httpx.AsyncClient(timeout=5) as c:
+        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
             await c.post(
                 f"{self._base}/metrics/report",
                 json={"peer_id": peer_id, "rtt_ms": rtt_ms, "jitter_ms": jitter_ms, "loss_rate": loss_rate},
@@ -85,7 +85,7 @@ class ServerClient:
     async def get_full_recommendation(self, peer_id: str) -> dict:
         """Returns {redundancy_level, quality, profile_name, based_on_samples}."""
         try:
-            async with httpx.AsyncClient(timeout=5) as c:
+            async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
                 r = await c.get(
                     f"{self._base}/metrics/recommendation/{peer_id}",
                     headers=self._auth_headers,

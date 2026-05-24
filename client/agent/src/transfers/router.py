@@ -53,13 +53,21 @@ async def send_file(req: SendRequest) -> TransferResult:
     except ValueError as exc:
         raise HTTPException(404, str(exc))
 
+    peer_transport = peer.get("transport", "udp")
+    requested_transport = req.transport or peer_transport
+    if requested_transport != peer_transport:
+        raise HTTPException(
+            400,
+            f"Transport mismatch: peer is registered as '{peer_transport}', requested '{requested_transport}'",
+        )
+
     target_api_url = peer["api_url"]
     target_udp_host = peer["udp_host"]
     target_udp_port = peer["udp_port"]
 
     packets, transfer_id, n, k, chunk_size = encode_file(file_bytes, redundancy_level)
 
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
         try:
             r = await client.post(
                 f"{target_api_url}/transfer/receive",
@@ -68,6 +76,7 @@ async def send_file(req: SendRequest) -> TransferResult:
                     "checksum": meta["sha256"],
                     "file_size": len(file_bytes),
                     "n": n, "k": k, "chunk_size": chunk_size,
+                    "filename": meta.get("filename", ""),
                 },
             )
             if r.status_code not in (200, 202):
@@ -83,7 +92,7 @@ async def send_file(req: SendRequest) -> TransferResult:
         status=TransferStatus.failed,
         reason="timeout_waiting_for_peer_result",
     )
-    async with httpx.AsyncClient(timeout=5) as client:
+    async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
         for _ in range(70):
             await asyncio.sleep(0.5)
             try:
@@ -168,7 +177,7 @@ async def _process_incoming(req: ReceiveRequest) -> None:
     file_id = None
     if result.status != TransferStatus.failed and result.file_bytes:
         storage = FileStorage(settings.STORAGE_PATH)
-        saved = storage.save(result.file_bytes, f"transfer_{req.transfer_id}")
+        saved = storage.save(result.file_bytes, req.filename or f"transfer_{req.transfer_id}")
         file_id = saved["file_id"]
 
     _transfers[req.transfer_id] = {

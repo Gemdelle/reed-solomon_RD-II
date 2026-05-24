@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { AppConfig } from "./types";
 import ConnectPage from "./pages/ConnectPage";
 import DashboardPage from "./pages/DashboardPage";
+import TitleBar from "./components/TitleBar";
 import { agentApi, serverApi } from "./api";
 import { handleCallback, initOidc } from "./auth/oidc";
 
@@ -104,8 +105,11 @@ export default function App() {
 
   if (callbackPending) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <p className="text-slate-400 text-sm">Completando inicio de sesión…</p>
+      <div className="flex flex-col min-h-screen bg-slate-950">
+        <TitleBar />
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-slate-400 text-sm">Completando inicio de sesión…</p>
+        </div>
       </div>
     );
   }

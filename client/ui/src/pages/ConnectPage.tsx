@@ -11,8 +11,32 @@ import { useState } from "react";
 import type { AuthConfig } from "../types";
 import { serverApi, agentApi, getAgentUrl } from "../api";
 import { initOidc, startLogin } from "../auth/oidc";
+import TitleBar from "../components/TitleBar";
 
 type Phase = "server" | "auth";
+
+const HISTORY_KEY = "serverHistory";
+const HISTORY_MAX = 5;
+
+function loadHistory(): string[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(history: string[]): void {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+}
+
+function addToHistory(history: string[], url: string): string[] {
+  const deduped = history.filter((h) => h !== url);
+  return [url, ...deduped].slice(0, HISTORY_MAX);
+}
 
 export default function ConnectPage() {
   const [phase, setPhase] = useState<Phase>("server");
@@ -22,6 +46,7 @@ export default function ConnectPage() {
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<string[]>(() => loadHistory());
 
   async function handleServerConnect() {
     setError(null);
@@ -34,16 +59,26 @@ export default function ConnectPage() {
       if (cfg.oidc_enabled && cfg.issuer && cfg.client_id) {
         // En Electron usamos el Agente como Loopback (http://127.0.0.1:8000/auth/callback)
         const redirectUri = window.rsAgent?.openExternal
-          ? `${getAgentUrl()}/auth/callback` 
+          ? `${getAgentUrl()}/auth/callback`
           : window.location.origin;
         initOidc(cfg.issuer, cfg.client_id, redirectUri);
       }
+      // Save to history on successful connect
+      const newHistory = addToHistory(history, url);
+      setHistory(newHistory);
+      saveHistory(newHistory);
       setPhase("auth");
     } catch (e) {
       setError(`No se pudo conectar: ${(e as Error).message}`);
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleRemoveHistory(url: string) {
+    const newHistory = history.filter((h) => h !== url);
+    setHistory(newHistory);
+    saveHistory(newHistory);
   }
 
   async function handleSsoLogin() {
@@ -72,7 +107,9 @@ export default function ConnectPage() {
   const ssoReady = authConfig?.oidc_enabled === true;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4">
+    <div className="flex flex-col min-h-screen bg-slate-950">
+      <TitleBar />
+    <div className="flex-1 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
 
         {/* Logo */}
@@ -101,8 +138,37 @@ export default function ConnectPage() {
                 onChange={(e) => setServerUrl(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleServerConnect()}
                 placeholder="https://rs.miempresa.com"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 mb-5"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500 mb-2"
               />
+
+              {/* ── Server history dropdown ── */}
+              {history.length > 0 && (
+                <div className="mb-5 bg-slate-800/60 border border-slate-700/60 rounded-lg overflow-hidden">
+                  {history.map((h) => (
+                    <div
+                      key={h}
+                      className="flex items-center gap-2 px-3 py-2 hover:bg-slate-700/50 transition-colors group"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setServerUrl(h)}
+                        className="flex-1 text-left text-xs font-mono text-slate-400 hover:text-slate-200 truncate transition-colors"
+                      >
+                        {h}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveHistory(h)}
+                        className="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all text-xs leading-none flex-shrink-0"
+                        title="Eliminar"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {error && (
                 <p className="text-red-400 text-xs mb-4 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
                   {error}
@@ -197,6 +263,7 @@ export default function ConnectPage() {
           )}
         </div>
       </div>
+    </div>
     </div>
   );
 }
