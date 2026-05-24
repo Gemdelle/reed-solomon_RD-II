@@ -175,37 +175,51 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                 <div className="flex gap-2">
                   {(["udp", "quic"] as const).map((t) => {
                     const peerTransport = peer.transport ?? "udp";
-                    const isSupported = peerTransport === t;
+                    const isRegistered = peerTransport === t;
                     const isSelected = transport === t;
                     return (
                       <button
                         key={t}
                         type="button"
-                        onClick={() => isSupported && setTransport(t)}
-                        disabled={!isSupported}
-                        title={!isSupported ? "El peer no soporta este transporte" : undefined}
-                        className={`flex-1 py-2 text-xs font-mono rounded-lg border transition-colors ${
+                        onClick={() => setTransport(t)}
+                        className={`flex-1 py-2 text-xs font-mono rounded-lg border transition-colors cursor-pointer ${
                           isSelected
                             ? t === "quic"
                               ? "bg-violet-900/60 border-violet-700 text-violet-300"
                               : "bg-slate-700 border-slate-600 text-slate-200"
-                            : "bg-slate-800/40 border-slate-700/50 text-slate-500"
-                        } ${!isSupported ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}`}
+                            : "bg-slate-800/40 border-slate-700/50 text-slate-500 hover:text-slate-300 hover:border-slate-600"
+                        }`}
                       >
                         {t.toUpperCase()}
-                        {isSupported && (
-                          <span className="ml-1 text-slate-500 font-sans normal-case">
-                            (recomendado)
-                          </span>
-                        )}
+                        {isRegistered ? (
+                          <span className="ml-1 text-slate-500 font-sans normal-case">✓</span>
+                        ) : null}
                       </button>
                     );
                   })}
                 </div>
 
-                {transport === "quic" && (
-                  <div className="mt-3 flex items-start gap-2 bg-violet-950/30 border border-violet-800/50 rounded-lg px-3 py-2.5 text-xs text-violet-300">
-                    <span className="flex-shrink-0 mt-px">ℹ️</span>
+                {/* Mismatch warning */}
+                {transport !== (peer.transport ?? "udp") ? (
+                  <div className="mt-2 flex items-start gap-2 bg-amber-950/30 border border-amber-800/50 rounded-lg px-3 py-2 text-xs text-amber-400">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                      <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <span>
+                      El peer está registrado como <span className="font-mono">{(peer.transport ?? "udp").toUpperCase()}</span>.
+                      Para usar {transport.toUpperCase()}, el agente remoto debe iniciarse con{" "}
+                      <code className="text-amber-300">TRANSPORT_MODE={transport}</code>.
+                    </span>
+                  </div>
+                ) : null}
+
+                {/* QUIC info when selected and no mismatch */}
+                {transport === "quic" && transport === (peer.transport ?? "udp") ? (
+                  <div className="mt-2 flex items-start gap-2 bg-violet-950/30 border border-violet-800/50 rounded-lg px-3 py-2.5 text-xs text-violet-300">
+                    <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                    </svg>
                     <div>
                       <p className="font-medium mb-0.5">Negociación QUIC/TLS</p>
                       <p className="text-violet-400/80">
@@ -214,7 +228,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                       </p>
                     </div>
                   </div>
-                )}
+                ) : null}
               </div>
 
               {/* ── Redundancy ── */}

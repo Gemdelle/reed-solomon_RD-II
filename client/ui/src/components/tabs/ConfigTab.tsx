@@ -98,7 +98,7 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
             </p>
           )}
 
-          <div className="flex justify-between text-sm gap-4">
+          <div className="flex justify-between text-sm gap-4 items-center">
             <span className="text-slate-400 flex-shrink-0">Transport</span>
             <span>
               {transportBadge && transport ? (
@@ -117,6 +117,19 @@ export default function ConfigTab({ peerId, agentUrl, serverUrl }: Props) {
           <InfoRow label="UDP Port">
             {(health as any)?.udp_port != null ? String((health as any).udp_port) : "—"}
           </InfoRow>
+
+          {/* QUIC hint when running in UDP mode */}
+          {transport === "udp" ? (
+            <div className="mt-2 flex items-start gap-2 bg-slate-800/40 border border-slate-700/50 rounded-lg px-3 py-2.5 text-xs text-slate-500">
+              <svg className="w-3.5 h-3.5 flex-shrink-0 mt-px text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              <span>
+                Para habilitar QUIC/TLS, reiniciá el agente con{" "}
+                <code className="text-slate-400 bg-slate-800 rounded px-1">TRANSPORT_MODE=quic</code>
+              </span>
+            </div>
+          ) : null}
         </div>
       </section>
 
