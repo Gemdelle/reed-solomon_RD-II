@@ -1,3 +1,11 @@
+# [1.1.0-beta.6](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.5...v1.1.0-beta.6) (2026-05-24)
+
+
+### Features
+
+* runtime transport switching + peer negotiation ([dff0063](https://github.com/Gemdelle/reed-solomon_RD-II/commit/dff00636f57d8c32a75b8d0357bd6cb4e257c311))
+* server history combobox, QUIC transport unlock, ConfigTab hint ([cfc6cfe](https://github.com/Gemdelle/reed-solomon_RD-II/commit/cfc6cfe9fc049355f351fc5ca70e014593b0dc92))
+
 # [1.1.0-beta.5](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.4...v1.1.0-beta.5) (2026-05-24)
 
 
