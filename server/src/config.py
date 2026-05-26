@@ -10,6 +10,11 @@ class Settings(BaseSettings):
     HEARTBEAT_TIMEOUT_S: int = 45    # peer marked offline after 45s of silence
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # Neo4j
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "password123"
+
     # Keycloak / OIDC
     OIDC_ENABLED: bool = False
     OIDC_ISSUER: str = ""

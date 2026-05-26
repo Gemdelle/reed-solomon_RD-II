@@ -40,6 +40,33 @@ class Settings(BaseSettings):
     INVITE_TOKEN: str = ""
     TRANSPORT_MODE: Literal["udp", "quic"] = "udp"
 
+    # Relay configuration
+    RELAY_CAPABLE: bool = False
+    # Comma-separated tags: "ephemeral" | "restricted" | "gateway"
+    RELAY_TAGS: str = ""
+    # For restricted tag: comma-separated peer_ids allowed to use this relay
+    RELAY_ALLOWED_PEERS: str = ""
+    # For restricted tag: comma-separated groups allowed to use this relay
+    RELAY_ALLOWED_GROUPS: str = ""
+    # For gateway tag: JSON mapping peer_id → {host, port, api_port?}
+    # e.g. '{"satellite-sta-1": {"host": "10.5.0.2", "port": 9001}}'
+    RELAY_STATIC_ROUTES: str = "{}"
+    # For gateway tag: comma-separated peer_ids allowed to use static routes via this relay
+    RELAY_GATEWAY_ALLOWED_PEERS: str = ""
+
+    # Incoming transfer policy (local, applied before server-side policy)
+    # "allow_all"  — accept from everyone
+    # "deny_all"   — reject all incoming transfers
+    # "allow_list" — accept only from INCOMING_ALLOWED_PEERS
+    # "deny_list"  — reject only peers in INCOMING_DENIED_PEERS
+    INCOMING_POLICY: Literal["allow_all", "deny_all", "allow_list", "deny_list"] = "allow_all"
+    INCOMING_ALLOWED_PEERS: str = ""  # comma-separated peer_ids for allow_list
+    INCOMING_DENIED_PEERS: str = ""   # comma-separated peer_ids for deny_list
+
+    # Display name for multi-device grouping in the peer list
+    # Defaults to preferred_username from JWT, or PEER_ID if not set
+    PEER_OWNER: str = ""
+
     model_config = {"env_file": ".env"}
 
     @model_validator(mode="after")

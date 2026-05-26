@@ -6,8 +6,12 @@ import type {
   DeviceTokenInfo,
   FileMetadata,
   IncomingConnection,
+  IncomingPolicyConfig,
   InviteInfo,
+  MetricHistory,
+  NetworkGraph,
   PeerInfo,
+  RelayConfig,
   RecommendationResponse,
   ScopeConfig,
   TransferResult,
@@ -24,6 +28,8 @@ declare global {
       winMaximize?: () => void;
       winClose?: () => void;
       onMaximizeChange?: (callback: (isMaximized: boolean) => void) => void;
+      getLoginItemEnabled?: () => Promise<boolean>;
+      setLoginItemEnabled?: (enabled: boolean) => Promise<void>;
     };
   }
 }
@@ -77,6 +83,11 @@ export const serverApi = {
       (r) => json<ScopeConfig>(r)
     ),
 
+  listPeers: () =>
+    fetch(`${getServerUrl()}/peers`, { headers: authHeaders() }).then((r) =>
+      json<PeerInfo[]>(r)
+    ),
+
   setScopes: (cfg: ScopeConfig) =>
     fetch(`${getServerUrl()}/peers/scopes`, {
       method: "PUT",
@@ -111,6 +122,45 @@ export const serverApi = {
     const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
     return new WebSocket(url);
   },
+
+  getPeerMetrics: (peerId: string) =>
+    fetch(`${getServerUrl()}/peers/${peerId}/metrics`, {
+      headers: authHeaders(),
+    }).then((r) => json<{ raw: string }>(r)),
+
+  getMetricHistory: (peerId: string) =>
+    fetch(`${getServerUrl()}/metrics/history/${peerId}`, {
+      headers: authHeaders(),
+    }).then((r) => json<MetricHistory>(r)),
+
+  getNetworkGraph: () =>
+    fetch(`${getServerUrl()}/metrics/network-graph`, {
+      headers: authHeaders(),
+    }).then((r) => json<NetworkGraph>(r)),
+
+  getRelayPeer: (targetId: string) =>
+    fetch(`${getServerUrl()}/peers/relay?target=${encodeURIComponent(targetId)}`, {
+      headers: authHeaders(),
+    }).then((r) => json<PeerInfo>(r)),
+
+  updateRelayConfig: (peerId: string, cfg: RelayConfig) =>
+    fetch(`${getServerUrl()}/peers/${encodeURIComponent(peerId)}/relay-config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(cfg),
+    }).then((r) => json<{ status: string; peer_id: string }>(r)),
+
+  getIncomingPolicy: (peerId: string) =>
+    fetch(`${getServerUrl()}/peers/${encodeURIComponent(peerId)}/incoming-policy`, {
+      headers: authHeaders(),
+    }).then((r) => json<IncomingPolicyConfig>(r)),
+
+  updateIncomingPolicy: (peerId: string, cfg: IncomingPolicyConfig) =>
+    fetch(`${getServerUrl()}/peers/${encodeURIComponent(peerId)}/incoming-policy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(cfg),
+    }).then((r) => json<{ status: string; peer_id: string }>(r)),
 };
 
 // ── Agent API (data plane) ────────────────────────────────────────────────────

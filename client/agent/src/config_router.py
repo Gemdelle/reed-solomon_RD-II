@@ -58,6 +58,9 @@ class FullConfigResponse(BaseModel):
     storage_path: str
     invite_token: str
     network_hint: str
+    incoming_policy: str
+    incoming_allowed_peers: str
+    incoming_denied_peers: str
 
 
 class FullConfigUpdateRequest(BaseModel):
@@ -71,6 +74,9 @@ class FullConfigUpdateRequest(BaseModel):
     storage_path: Optional[str] = None
     invite_token: Optional[str] = None
     network_hint: Optional[str] = None
+    incoming_policy: Optional[Literal["allow_all", "deny_all", "allow_list", "deny_list"]] = None
+    incoming_allowed_peers: Optional[str] = None
+    incoming_denied_peers: Optional[str] = None
 
 
 class FullConfigUpdateResponse(BaseModel):
@@ -93,6 +99,9 @@ async def get_config() -> FullConfigResponse:
         storage_path=config_store.get("storage_path", settings.STORAGE_PATH),
         invite_token=config_store.get("invite_token", settings.INVITE_TOKEN),
         network_hint=config_store.get("network_hint", settings.NETWORK_HINT),
+        incoming_policy=config_store.get("incoming_policy", settings.INCOMING_POLICY),
+        incoming_allowed_peers=config_store.get("incoming_allowed_peers", settings.INCOMING_ALLOWED_PEERS),
+        incoming_denied_peers=config_store.get("incoming_denied_peers", settings.INCOMING_DENIED_PEERS),
     )
 
 

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, ipcMain } from "electron";
+import { app, BrowserWindow, shell, ipcMain, IpcMainInvokeEvent } from "electron";
 import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as http from "http";
@@ -18,6 +18,18 @@ ipcMain.on("win-maximize", () => {
   else mainWindow?.maximize();
 });
 ipcMain.on("win-close", () => mainWindow?.close());
+
+ipcMain.handle("get-login-item", (_event: IpcMainInvokeEvent): boolean => {
+  return app.getLoginItemSettings().openAtLogin;
+});
+
+ipcMain.handle("set-login-item", (_event: IpcMainInvokeEvent, enabled: boolean): void => {
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    openAsHidden: true,
+    name: "RockDove",
+  });
+});
 
 function resolveAgent(): { cmd: string; args: string[]; cwd: string } {
   if (app.isPackaged) {

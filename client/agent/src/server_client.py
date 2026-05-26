@@ -29,6 +29,7 @@ class ServerClient:
         udp_host: str,
         udp_port: int,
         transport: str = "udp",
+        owner: str | None = None,
     ) -> dict:
         body: dict = {
             "peer_id": peer_id,
@@ -36,6 +37,9 @@ class ServerClient:
             "udp_host": udp_host,
             "udp_port": udp_port,
             "transport": transport,
+            "relay_capable": self._settings.RELAY_CAPABLE,
+            "relay_tags": [t.strip() for t in self._settings.RELAY_TAGS.split(",") if t.strip()],
+            "owner": owner or self._settings.PEER_OWNER or None,
         }
         try:
             invite = _config_store.get("invite_token", "") or self._settings.INVITE_TOKEN
@@ -77,12 +81,18 @@ class ServerClient:
             return r.json()
 
     async def report_metrics(
-        self, peer_id: str, rtt_ms: float, jitter_ms: float, loss_rate: float
+        self, peer_id: str, rtt_ms: float, jitter_ms: float, loss_rate: float, target_peer_id: str = "server"
     ) -> None:
         async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
             await c.post(
                 f"{self._base}/metrics/report",
-                json={"peer_id": peer_id, "rtt_ms": rtt_ms, "jitter_ms": jitter_ms, "loss_rate": loss_rate},
+                json={
+                    "peer_id": peer_id,
+                    "target_peer_id": target_peer_id,
+                    "rtt_ms": rtt_ms,
+                    "jitter_ms": jitter_ms,
+                    "loss_rate": loss_rate
+                },
                 headers=self._auth_headers,
             )
 
@@ -108,6 +118,31 @@ class ServerClient:
     async def get_recommendation(self, peer_id: str) -> float:
         rec = await self.get_full_recommendation(peer_id)
         return rec["redundancy_level"]
+
+    async def get_incoming_policy(self, peer_id: str) -> dict:
+        """Fetch the server-side incoming policy for this peer (admin-configured)."""
+        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
+            r = await c.get(
+                f"{self._base}/peers/{peer_id}/incoming-policy",
+                headers=self._auth_headers,
+            )
+            if r.status_code == 404:
+                return {}
+            r.raise_for_status()
+            return r.json()
+
+    async def get_relay_for_peer(self, target_id: str) -> dict:
+        """Ask the server for the best relay peer to reach target_id."""
+        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
+            r = await c.get(
+                f"{self._base}/peers/relay",
+                params={"target": target_id},
+                headers=self._auth_headers,
+            )
+            if r.status_code == 404:
+                raise ValueError(f"No relay available for target {target_id!r}")
+            r.raise_for_status()
+            return r.json()
 
 
 server_client = ServerClient()
