@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { serverApi, getServerUrl } from "../api";
-import type { DeviceTokenInfo, MetricHistory, NetworkEdge, PeerInfo, RelayConfig } from "../types";
+import type { DeviceTokenInfo, IncomingPolicyConfig, MetricHistory, NetworkEdge, PeerInfo, RelayConfig } from "../types";
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 interface Props {}
 
-type Tab = "scopes" | "invites" | "device-tokens" | "relays" | "metrics";
+type Tab = "scopes" | "invites" | "device-tokens" | "relays" | "metrics" | "policies";
 
 interface GeneratedInvite {
   token: string;
@@ -1192,6 +1192,175 @@ function MetricsTab() {
   );
 }
 
+// ── Policies tab ─────────────────────────────────────────────────────────────
+
+const POLICY_LABELS: Record<string, { label: string; desc: string; color: string }> = {
+  allow_all:  { label: "Permitir todo",    desc: "Acepta transferencias de cualquier peer",           color: "text-emerald-400" },
+  deny_all:   { label: "Bloquear todo",    desc: "Rechaza todas las transferencias entrantes",         color: "text-red-400" },
+  allow_list: { label: "Lista de acceso",  desc: "Solo acepta de peers en la lista explícita",        color: "text-amber-400" },
+};
+
+interface PolicyPeerRowProps {
+  peer: PeerInfo;
+  onSaved: () => void;
+}
+
+function PolicyPeerRow({ peer, onSaved }: PolicyPeerRowProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [policy, setPolicy] = useState<IncomingPolicyConfig["incoming_policy"]>(
+    (peer.incoming_policy as IncomingPolicyConfig["incoming_policy"]) ?? "allow_all"
+  );
+  const [allowedPeers, setAllowedPeers] = useState(
+    (peer.incoming_allowed_peers ?? []).join(", ")
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const cfg: IncomingPolicyConfig = {
+        incoming_policy: policy,
+        incoming_allowed_peers: policy === "allow_list"
+          ? allowedPeers.split(",").map((s) => s.trim()).filter(Boolean)
+          : [],
+      };
+      await serverApi.updateIncomingPolicy(peer.peer_id, cfg);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const policyInfo = POLICY_LABELS[policy] ?? POLICY_LABELS.allow_all;
+
+  return (
+    <div className="border border-slate-700/60 rounded-xl overflow-hidden">
+      <div
+        className="flex items-center gap-3 px-4 py-3 bg-slate-800/30 cursor-pointer hover:bg-slate-800/50 transition-colors"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <span className="text-xs font-mono text-slate-200 truncate">{peer.peer_id}</span>
+          {peer.owner && peer.owner !== peer.peer_id && (
+            <span className="text-[10px] text-slate-500">[{peer.owner}]</span>
+          )}
+          <span className={`text-[9px] px-1 rounded ${peer.online ? "text-emerald-400" : "text-slate-600"}`}>
+            {peer.online ? "● online" : "○ offline"}
+          </span>
+        </div>
+        <span className={`text-[10px] shrink-0 ${policyInfo.color}`}>{policyInfo.label}</span>
+        <svg
+          className={`w-3.5 h-3.5 text-slate-500 transition-transform shrink-0 ${expanded ? "rotate-180" : ""}`}
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </div>
+
+      {expanded && (
+        <div className="px-4 py-4 border-t border-slate-700/60 space-y-4 bg-slate-900/20">
+          <div>
+            <p className="text-xs font-medium text-slate-300 mb-2">Política de transferencias entrantes</p>
+            <div className="space-y-2">
+              {(Object.entries(POLICY_LABELS) as [IncomingPolicyConfig["incoming_policy"], typeof POLICY_LABELS[string]][]).map(([val, info]) => (
+                <label key={val} className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="radio"
+                    name={`policy-${peer.peer_id}`}
+                    value={val}
+                    checked={policy === val}
+                    onChange={() => setPolicy(val)}
+                    className="mt-0.5 accent-brand-500"
+                  />
+                  <div>
+                    <span className={`text-xs font-medium ${info.color}`}>{info.label}</span>
+                    <p className="text-[10px] text-slate-500">{info.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {policy === "allow_list" && (
+            <div>
+              <label className="text-[10px] text-slate-500 block mb-1">
+                Peers permitidos (coma separado)
+              </label>
+              <input
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-brand-500"
+                placeholder="peer-a, edge-sensor-01"
+                value={allowedPeers}
+                onChange={(e) => setAllowedPeers(e.target.value)}
+              />
+            </div>
+          )}
+
+          {error && (
+            <p className="text-xs text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2">
+              {error}
+            </p>
+          )}
+
+          <div className="flex items-center justify-end gap-3">
+            {saved && <span className="text-xs text-emerald-400">Guardado</span>}
+            <button
+              onClick={save}
+              disabled={saving}
+              className="text-xs bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 transition-colors"
+            >
+              {saving ? "Guardando…" : "Guardar"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PoliciesTab() {
+  const [peers, setPeers] = useState<PeerInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    serverApi
+      .listPeers()
+      .then((ps) => setPeers(ps.sort((a, b) => a.peer_id.localeCompare(b.peer_id))))
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <p className="text-xs text-slate-500 animate-pulse">Cargando peers…</p>;
+  if (error) return <p className="text-xs text-red-400">{error}</p>;
+  if (peers.length === 0)
+    return <p className="text-xs text-slate-600 italic">Sin peers registrados.</p>;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-slate-500">
+        Controlá qué peers pueden recibir transferencias entrantes. Útil para agentes headless y
+        dispositivos que deben quedar en modo solo-envío o con whitelist de fuentes confiables.
+        El agente aplica la política al arrancar — cambiarla aquí requiere reinicio del agente.
+      </p>
+      <div className="space-y-2">
+        {peers.map((p) => (
+          <PolicyPeerRow key={p.peer_id} peer={p} onSaved={load} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 const TAB_LABELS: Record<Tab, string> = {
@@ -1200,6 +1369,7 @@ const TAB_LABELS: Record<Tab, string> = {
   "device-tokens": "Device Tokens",
   "relays": "Relays",
   "metrics": "Network Health",
+  "policies": "Políticas",
 };
 
 export default function AdminPanel(_props: Props) {
@@ -1237,6 +1407,7 @@ export default function AdminPanel(_props: Props) {
         {tab === "device-tokens" && <DeviceTokensTab />}
         {tab === "relays" && <RelaysTab />}
         {tab === "metrics" && <MetricsTab />}
+        {tab === "policies" && <PoliciesTab />}
       </div>
     </div>
   );

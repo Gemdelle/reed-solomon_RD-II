@@ -10,6 +10,7 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
+import config_store
 import token_store
 from config import get_settings
 from rs.decoder import decode_transfer
@@ -26,6 +27,34 @@ router = APIRouter()
 
 _transfers: dict[str, dict] = {}
 _transport_requests: dict[str, dict] = {}
+
+
+def _check_incoming_policy(sender_peer_id: str | None) -> None:
+    """Raise HTTP 403 if the effective incoming policy rejects this sender.
+
+    config_store values take precedence (server admin can push overrides via the
+    /peers/{id}/incoming-policy endpoint, which _apply_server_incoming_policy
+    writes into config_store on startup).
+    """
+    settings = get_settings()
+    policy: str = config_store.get("incoming_policy", settings.INCOMING_POLICY)
+
+    if policy == "allow_all":
+        return
+    if policy == "deny_all":
+        raise HTTPException(403, "Incoming transfers are disabled on this peer")
+
+    if policy == "allow_list":
+        raw = config_store.get("incoming_allowed_peers", settings.INCOMING_ALLOWED_PEERS)
+        allowed = {p.strip() for p in raw.split(",") if p.strip()}
+        if not sender_peer_id or sender_peer_id not in allowed:
+            raise HTTPException(403, f"Sender '{sender_peer_id}' is not in the allow list")
+
+    if policy == "deny_list":
+        raw = config_store.get("incoming_denied_peers", settings.INCOMING_DENIED_PEERS)
+        denied = {p.strip() for p in raw.split(",") if p.strip()}
+        if sender_peer_id and sender_peer_id in denied:
+            raise HTTPException(403, f"Sender '{sender_peer_id}' is blocked on this peer")
 
 
 @router.post("/send", response_model=TransferResult)
@@ -77,12 +106,15 @@ async def send_file(req: SendRequest) -> TransferResult:
 
     packets, transfer_id, n, k, chunk_size = encode_file(file_bytes, redundancy_level)
 
+    effective_pid = token_store.get_peer_id() or settings.PEER_ID
+
     receive_payload = {
         "transfer_id": transfer_id,
         "checksum": meta["sha256"],
         "file_size": len(file_bytes),
         "n": n, "k": k, "chunk_size": chunk_size,
         "filename": meta.get("filename", ""),
+        "sender_peer_id": effective_pid,
     }
 
     relay_info: dict | None = None
@@ -185,6 +217,10 @@ async def receive_transfer(req: ReceiveRequest, background_tasks: BackgroundTask
     settings = get_settings()
     if req.relay_to and not settings.RELAY_CAPABLE:
         raise HTTPException(403, "This agent is not configured as a relay")
+
+    # Enforce local incoming-transfer policy (skip for relay: relay ACL handled separately)
+    if not req.relay_to:
+        _check_incoming_policy(req.sender_peer_id)
 
     _transfers[req.transfer_id] = {"status": "pending"}
     if req.relay_to:
@@ -294,6 +330,22 @@ async def _process_relay(req: ReceiveRequest) -> None:
     except Exception:
         static_routes = {}
 
+    if target_id in static_routes and "gateway" in relay_tags:
+        gateway_allowed = {p.strip() for p in settings.RELAY_GATEWAY_ALLOWED_PEERS.split(",") if p.strip()}
+        if gateway_allowed and (not req.sender_peer_id or req.sender_peer_id not in gateway_allowed):
+            _transfers[req.transfer_id] = {
+                "transfer_id": req.transfer_id,
+                "status": TransferStatus.failed,
+                "recovered_blocks": 0,
+                "total_blocks": 0,
+                "file_id": None,
+                "reason": f"gateway_access_denied: sender '{req.sender_peer_id}' not in allowed list",
+                "relay_tag": req.relay_tag,
+                "relay_target": target_id,
+                "via_relay": True,
+            }
+            return
+
     # Resolve target address —————————————————————————————————————————————
     # Priority 1: static routing table (already loaded above)
 
@@ -341,6 +393,7 @@ async def _process_relay(req: ReceiveRequest) -> None:
                     "k": req.k,
                     "chunk_size": req.chunk_size,
                     "filename": req.filename,
+                    "sender_peer_id": req.sender_peer_id,
                     # No relay_to — this is the final hop
                 },
             )

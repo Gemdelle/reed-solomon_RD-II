@@ -53,16 +53,19 @@ const TRANSPORT_BADGE: Record<string, string> = {
 function PeerRow({
   peer,
   currentPeerId,
+  currentOwner,
   onSend,
 }: {
   peer: PeerInfo;
   currentPeerId: string;
+  currentOwner: string | null;
   onSend: (peer: PeerInfo) => void;
 }) {
   const status = getPeerStatus(peer);
   const transport = peer.transport ?? "udp";
   const badgeCls = TRANSPORT_BADGE[transport] ?? TRANSPORT_BADGE.udp;
   const isSelf = peer.peer_id === currentPeerId;
+  const isOwnDevice = !isSelf && currentOwner != null && peer.owner === currentOwner;
 
   return (
     <li className="flex items-center gap-3 px-4 py-3 hover:bg-slate-800/40 transition-colors">
@@ -76,6 +79,11 @@ function PeerRow({
           {isSelf && (
             <span className="text-xs bg-brand-900 text-brand-400 rounded px-1.5 py-0.5">
               yo
+            </span>
+          )}
+          {isOwnDevice && (
+            <span className="text-xs bg-slate-800 text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">
+              mi dispositivo
             </span>
           )}
           <span className={`text-xs font-mono border rounded px-1.5 py-0.5 ${badgeCls}`}>
@@ -107,9 +115,13 @@ function PeerRow({
       {status === "online" && !isSelf ? (
         <button
           onClick={() => onSend(peer)}
-          className="flex-shrink-0 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 rounded-lg px-3 py-1.5 transition-colors"
+          className={`flex-shrink-0 text-xs border rounded-lg px-3 py-1.5 transition-colors ${
+            isOwnDevice
+              ? "bg-brand-950/30 hover:bg-brand-900/50 text-brand-400 border-brand-800"
+              : "bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700"
+          }`}
         >
-          Enviar
+          {isOwnDevice ? "Transferir" : "Enviar"}
         </button>
       ) : status !== "online" && !isSelf ? (
         <span className={`flex-shrink-0 text-xs ${STATUS_TEXT[status]}`}>
@@ -123,7 +135,11 @@ function PeerRow({
 export default function PeerList({ peers, currentPeerId, onSend }: Props) {
   const online  = peers.filter((p) => p.online);
   const notOnline = peers.filter((p) => !p.online);
-  const sorted = [...online, ...notOnline];
+
+  const currentOwner = peers.find((p) => p.peer_id === currentPeerId)?.owner ?? null;
+
+  // If any peer has an owner set, group by owner; otherwise flat list
+  const hasOwners = peers.some((p) => p.owner);
 
   const header = (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
@@ -149,19 +165,72 @@ export default function PeerList({ peers, currentPeerId, onSend }: Props) {
     );
   }
 
+  const sorted = [...online, ...notOnline];
+
+  if (!hasOwners) {
+    return (
+      <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+        {header}
+        <ul className="divide-y divide-slate-800/50">
+          {sorted.map((peer) => (
+            <PeerRow
+              key={peer.peer_id}
+              peer={peer}
+              currentPeerId={currentPeerId}
+              currentOwner={currentOwner}
+              onSend={onSend}
+            />
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Group by owner
+  const groups = new Map<string, PeerInfo[]>();
+  for (const peer of sorted) {
+    const key = peer.owner ?? peer.peer_id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(peer);
+  }
+
   return (
     <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
       {header}
-      <ul className="divide-y divide-slate-800/50">
-        {sorted.map((peer) => (
-          <PeerRow
-            key={peer.peer_id}
-            peer={peer}
-            currentPeerId={currentPeerId}
-            onSend={onSend}
-          />
-        ))}
-      </ul>
+      {Array.from(groups.entries()).map(([owner, groupPeers]) => {
+        const isCurrentOwner = owner === currentOwner;
+        const onlineCount = groupPeers.filter((p) => p.online).length;
+        return (
+          <div key={owner}>
+            <div className={`flex items-center gap-2 px-4 py-1.5 border-b border-slate-800/50 ${
+              isCurrentOwner ? "bg-brand-950/20" : "bg-slate-800/20"
+            }`}>
+              <span className={`text-[11px] font-medium ${
+                isCurrentOwner ? "text-brand-400" : "text-slate-400"
+              }`}>
+                {owner}
+              </span>
+              {isCurrentOwner && (
+                <span className="text-[10px] text-brand-600">· yo</span>
+              )}
+              <span className="ml-auto text-[10px] text-slate-600">
+                {onlineCount}/{groupPeers.length} online
+              </span>
+            </div>
+            <ul className="divide-y divide-slate-800/50">
+              {groupPeers.map((peer) => (
+                <PeerRow
+                  key={peer.peer_id}
+                  peer={peer}
+                  currentPeerId={currentPeerId}
+                  currentOwner={currentOwner}
+                  onSend={onSend}
+                />
+              ))}
+            </ul>
+          </div>
+        );
+      })}
     </div>
   );
 }
