@@ -1,3 +1,11 @@
+# [1.1.0-beta.8](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.7...v1.1.0-beta.8) (2026-05-26)
+
+
+### Features
+
+* agregar neo4j con pesos para persistencia y toma de decisiones ([96cb8f1](https://github.com/Gemdelle/reed-solomon_RD-II/commit/96cb8f196c832ac5e4d775234dff1eaf4c51fc03))
+* relay system, network graph, and metrics charts ([34f7b83](https://github.com/Gemdelle/reed-solomon_RD-II/commit/34f7b83bd68c8a1ac2f44138d30dfb492b59cc34))
+
 # [1.1.0-beta.7](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.6...v1.1.0-beta.7) (2026-05-24)
 
 
