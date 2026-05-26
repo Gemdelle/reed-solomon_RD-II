@@ -36,6 +36,8 @@ class ServerClient:
             "udp_host": udp_host,
             "udp_port": udp_port,
             "transport": transport,
+            "relay_capable": self._settings.RELAY_CAPABLE,
+            "relay_tags": [t.strip() for t in self._settings.RELAY_TAGS.split(",") if t.strip()],
         }
         try:
             invite = _config_store.get("invite_token", "") or self._settings.INVITE_TOKEN
@@ -114,6 +116,19 @@ class ServerClient:
     async def get_recommendation(self, peer_id: str) -> float:
         rec = await self.get_full_recommendation(peer_id)
         return rec["redundancy_level"]
+
+    async def get_relay_for_peer(self, target_id: str) -> dict:
+        """Ask the server for the best relay peer to reach target_id."""
+        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
+            r = await c.get(
+                f"{self._base}/peers/relay",
+                params={"target": target_id},
+                headers=self._auth_headers,
+            )
+            if r.status_code == 404:
+                raise ValueError(f"No relay available for target {target_id!r}")
+            r.raise_for_status()
+            return r.json()
 
 
 server_client = ServerClient()

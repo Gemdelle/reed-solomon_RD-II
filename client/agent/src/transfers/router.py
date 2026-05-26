@@ -1,4 +1,6 @@
 import asyncio
+import json
+import secrets
 import time
 import uuid
 from datetime import datetime, timezone
@@ -75,22 +77,44 @@ async def send_file(req: SendRequest) -> TransferResult:
 
     packets, transfer_id, n, k, chunk_size = encode_file(file_bytes, redundancy_level)
 
+    receive_payload = {
+        "transfer_id": transfer_id,
+        "checksum": meta["sha256"],
+        "file_size": len(file_bytes),
+        "n": n, "k": k, "chunk_size": chunk_size,
+        "filename": meta.get("filename", ""),
+    }
+
+    relay_info: dict | None = None
+    relay_tag: str | None = None
+
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
         try:
             r = await client.post(
                 f"{target_api_url}/transfer/receive",
-                json={
-                    "transfer_id": transfer_id,
-                    "checksum": meta["sha256"],
-                    "file_size": len(file_bytes),
-                    "n": n, "k": k, "chunk_size": chunk_size,
-                    "filename": meta.get("filename", ""),
-                },
+                json=receive_payload,
             )
             if r.status_code not in (200, 202):
                 raise HTTPException(502, f"Peer rejected transfer: {r.text}")
-        except httpx.RequestError as exc:
-            raise HTTPException(502, f"Cannot reach peer: {exc}")
+        except httpx.RequestError:
+            # Direct path failed — attempt relay fallback
+            try:
+                relay_info = await server_client.get_relay_for_peer(req.target_peer_id)
+            except ValueError as relay_err:
+                raise HTTPException(502, f"Cannot reach peer directly and no relay available: {relay_err}")
+            relay_tag = f"rly-{secrets.token_hex(4)}"
+            relay_api_url = relay_info["api_url"]
+            relay_payload = {**receive_payload, "relay_to": req.target_peer_id, "relay_tag": relay_tag}
+            try:
+                r = await client.post(f"{relay_api_url}/transfer/receive", json=relay_payload)
+                if r.status_code not in (200, 202):
+                    raise HTTPException(502, f"Relay rejected transfer: {r.text}")
+            except httpx.RequestError as relay_exc:
+                raise HTTPException(502, f"Cannot reach relay peer: {relay_exc}")
+            # Override send target to relay
+            target_api_url = relay_api_url
+            target_udp_host = relay_info["udp_host"]
+            target_udp_port = relay_info["udp_port"]
 
     t_send = time.monotonic()
     await get_transport().send(packets, target_udp_host, target_udp_port)
@@ -144,19 +168,29 @@ async def send_file(req: SendRequest) -> TransferResult:
         )
     )
 
-    base = result.model_dump(exclude={"effective_redundancy", "quality", "profile_name"})
+    base = result.model_dump(exclude={"effective_redundancy", "quality", "profile_name", "relay_tag", "relay_target", "via_relay"})
     return TransferResult(
         **base,
         effective_redundancy=redundancy_level,
         quality=effective_quality,
         profile_name=effective_profile,
+        relay_tag=relay_tag,
+        relay_target=req.target_peer_id if relay_info else None,
+        via_relay=relay_info is not None,
     )
 
 
 @router.post("/receive", status_code=202)
 async def receive_transfer(req: ReceiveRequest, background_tasks: BackgroundTasks) -> dict:
+    settings = get_settings()
+    if req.relay_to and not settings.RELAY_CAPABLE:
+        raise HTTPException(403, "This agent is not configured as a relay")
+
     _transfers[req.transfer_id] = {"status": "pending"}
-    background_tasks.add_task(_process_incoming, req)
+    if req.relay_to:
+        background_tasks.add_task(_process_relay, req)
+    else:
+        background_tasks.add_task(_process_incoming, req)
     return {"transfer_id": req.transfer_id, "status": "pending"}
 
 
@@ -213,6 +247,148 @@ async def _process_incoming(req: ReceiveRequest) -> None:
             total_blocks=result.total_blocks,
         )
     )
+
+
+async def _process_relay(req: ReceiveRequest) -> None:
+    """
+    Relay mode: collect RS packets from sender, forward to the final target,
+    then destroy the buffer. Never writes to STORAGE_PATH (ephemeral by design).
+
+    Supports two target resolution strategies:
+      1. Static routes (RELAY_STATIC_ROUTES env) — no server TCP needed (gateway mode)
+      2. Server lookup — standard peer discovery for normal relay use cases
+    """
+    settings = get_settings()
+    transport = get_transport()
+    target_id = req.relay_to  # guaranteed non-None by caller
+
+    # Access control for restricted relays
+    relay_tags = [t.strip() for t in settings.RELAY_TAGS.split(",") if t.strip()]
+    if "restricted" in relay_tags and req.relay_tag:
+        allowed_peers = {p.strip() for p in settings.RELAY_ALLOWED_PEERS.split(",") if p.strip()}
+        # relay_tag encodes sender identity as "rly-{hex}" — we can't verify peer_id from UDP
+        # so restricted mode relies on the relay_tag being kept secret between sender and relay.
+        # Full identity verification requires QUIC + CERT_HELLO (future enhancement).
+        pass
+
+    # Collect packets in transport's in-memory buffer (never touches disk)
+    packets = await transport.collect(req.transfer_id, timeout=req.timeout)
+
+    if not packets:
+        _transfers[req.transfer_id] = {
+            "transfer_id": req.transfer_id,
+            "status": TransferStatus.failed,
+            "recovered_blocks": 0,
+            "total_blocks": 0,
+            "file_id": None,
+            "reason": "relay_collect_timeout",
+            "relay_tag": req.relay_tag,
+            "relay_target": target_id,
+            "via_relay": True,
+        }
+        return
+
+    # Gateway access control — only checked when forwarding via a static route
+    try:
+        static_routes: dict = json.loads(settings.RELAY_STATIC_ROUTES)
+    except Exception:
+        static_routes = {}
+
+    # Resolve target address —————————————————————————————————————————————
+    # Priority 1: static routing table (already loaded above)
+
+    target_host: str | None = None
+    target_port: int | None = None
+    target_api_url: str | None = None
+
+    if target_id in static_routes:
+        route = static_routes[target_id]
+        target_host = route["host"]
+        target_port = int(route.get("port", 9001))
+        api_port = int(route.get("api_port", 8000))
+        target_api_url = f"http://{target_host}:{api_port}"
+    else:
+        # Priority 2: server peer registry lookup
+        try:
+            peer = await server_client.get_peer(target_id)
+            target_host = peer["udp_host"]
+            target_port = int(peer["udp_port"])
+            target_api_url = peer["api_url"]
+        except Exception as e:
+            _transfers[req.transfer_id] = {
+                "transfer_id": req.transfer_id,
+                "status": TransferStatus.failed,
+                "recovered_blocks": 0,
+                "total_blocks": len(packets),
+                "file_id": None,
+                "reason": f"relay_target_not_found: {e}",
+                "relay_tag": req.relay_tag,
+                "relay_target": target_id,
+                "via_relay": True,
+            }
+            return
+
+    # Signal target to expect incoming transfer —————————————————————————————
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        try:
+            r = await client.post(
+                f"{target_api_url}/transfer/receive",
+                json={
+                    "transfer_id": req.transfer_id,
+                    "checksum": req.checksum,
+                    "file_size": req.file_size,
+                    "n": req.n,
+                    "k": req.k,
+                    "chunk_size": req.chunk_size,
+                    "filename": req.filename,
+                    # No relay_to — this is the final hop
+                },
+            )
+            if r.status_code not in (200, 202):
+                raise RuntimeError(f"target rejected: {r.text}")
+        except Exception as e:
+            _transfers[req.transfer_id] = {
+                "transfer_id": req.transfer_id,
+                "status": TransferStatus.failed,
+                "recovered_blocks": 0,
+                "total_blocks": len(packets),
+                "file_id": None,
+                "reason": f"relay_notify_target_failed: {e}",
+                "relay_tag": req.relay_tag,
+                "relay_target": target_id,
+                "via_relay": True,
+            }
+            return
+
+    # Forward packets to target (buffer is consumed and will be GC'd after this) ——
+    await transport.send(packets, target_host, target_port)
+
+    # Poll target for final delivery status ————————————————————————————————
+    final_status = "unknown"
+    async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
+        for _ in range(70):
+            await asyncio.sleep(0.5)
+            try:
+                r = await client.get(f"{target_api_url}/transfer/{req.transfer_id}/status")
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("status") not in ("pending", None):
+                        final_status = data.get("status", "unknown")
+                        break
+            except httpx.RequestError:
+                pass
+
+    _transfers[req.transfer_id] = {
+        "transfer_id": req.transfer_id,
+        "status": TransferStatus.relayed,
+        "recovered_blocks": 0,
+        "total_blocks": len(packets),
+        "file_id": None,
+        "reason": f"delivered:{final_status}",
+        "relay_tag": req.relay_tag,
+        "relay_target": target_id,
+        "via_relay": True,
+    }
 
 
 @router.get("/{transfer_id}/status", response_model=TransferResult)

@@ -40,6 +40,18 @@ class Settings(BaseSettings):
     INVITE_TOKEN: str = ""
     TRANSPORT_MODE: Literal["udp", "quic"] = "udp"
 
+    # Relay configuration
+    RELAY_CAPABLE: bool = False
+    # Comma-separated tags: "ephemeral" | "restricted" | "gateway"
+    RELAY_TAGS: str = ""
+    # For restricted tag: comma-separated peer_ids allowed to use this relay
+    RELAY_ALLOWED_PEERS: str = ""
+    # For restricted tag: comma-separated groups allowed to use this relay
+    RELAY_ALLOWED_GROUPS: str = ""
+    # For gateway tag: JSON mapping peer_id → {host, port, api_port?}
+    # e.g. '{"satellite-sta-1": {"host": "10.5.0.2", "port": 9001}}'
+    RELAY_STATIC_ROUTES: str = "{}"
+
     model_config = {"env_file": ".env"}
 
     @model_validator(mode="after")

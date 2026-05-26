@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from redis_client import get_redis
 from neo4j_client import get_neo4j
 
@@ -7,6 +9,8 @@ _MAX_REPORTS = 10
 
 
 async def store_report(report: MetricReport) -> None:
+    report = report.model_copy(update={"recorded_at": datetime.now(timezone.utc).isoformat()})
+
     # 1. Store in Redis for recommendation history (single-hop / server-relative)
     if report.target_peer_id == "server":
         r = get_redis()

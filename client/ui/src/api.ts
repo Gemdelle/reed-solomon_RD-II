@@ -7,7 +7,10 @@ import type {
   FileMetadata,
   IncomingConnection,
   InviteInfo,
+  MetricHistory,
+  NetworkGraph,
   PeerInfo,
+  RelayConfig,
   RecommendationResponse,
   ScopeConfig,
   TransferResult,
@@ -121,6 +124,28 @@ export const serverApi = {
     fetch(`${getServerUrl()}/peers/${peerId}/metrics`, {
       headers: authHeaders(),
     }).then((r) => json<{ raw: string }>(r)),
+
+  getMetricHistory: (peerId: string) =>
+    fetch(`${getServerUrl()}/metrics/history/${peerId}`, {
+      headers: authHeaders(),
+    }).then((r) => json<MetricHistory>(r)),
+
+  getNetworkGraph: () =>
+    fetch(`${getServerUrl()}/metrics/network-graph`, {
+      headers: authHeaders(),
+    }).then((r) => json<NetworkGraph>(r)),
+
+  getRelayPeer: (targetId: string) =>
+    fetch(`${getServerUrl()}/peers/relay?target=${encodeURIComponent(targetId)}`, {
+      headers: authHeaders(),
+    }).then((r) => json<PeerInfo>(r)),
+
+  updateRelayConfig: (peerId: string, cfg: RelayConfig) =>
+    fetch(`${getServerUrl()}/peers/${encodeURIComponent(peerId)}/relay-config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(cfg),
+    }).then((r) => json<{ status: string; peer_id: string }>(r)),
 };
 
 // ── Agent API (data plane) ────────────────────────────────────────────────────

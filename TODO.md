@@ -634,10 +634,15 @@ Selección de relay: por ahora devuelve el primero con `relay_capable=true` (FIF
 | Endpoints `/transfer/incoming`, `/accept`, `/reject` | ✅ `transfers/router.py` |
 | `IncomingConnectionsBanner` — UI accept/reject con cert info | ✅ `ui/src/components/` |
 | Test suite QUIC coverage (73 tests passing) | ✅ `tests/test_transport.py` |
-| `RELAY_CAPABLE` en config + registro | ❌ pendiente |
-| `relay_capable` en server (Redis + endpoints) | ❌ pendiente |
-| `GET /peers/relay` en server | ❌ pendiente |
-| `POST /peers/{id}/capabilities` en server | ❌ pendiente |
-| Relay fallback en `send_file()` | ❌ pendiente |
-| `_process_relay()` con tag efímero | ❌ pendiente |
-| Badge relay + tab Relays en UI | ❌ pendiente |
+| `RELAY_CAPABLE` en config + registro | ✅ `config.py` + `server_client.py` |
+| `relay_capable` + `relay_tags` en server (Neo4j + endpoints) | ✅ `peers/router.py` |
+| `GET /peers/relay` en server | ✅ `peers/router.py` |
+| `POST /peers/{id}/relay-config` en server (admin override) | ✅ `peers/router.py` |
+| Relay fallback en `send_file()` | ✅ `transfers/router.py` |
+| `_process_relay()` — ephemeral buffer, static routes, poll target | ✅ `transfers/router.py` |
+| Badge relay + tab Relays en UI | ✅ `PeerList.tsx` + `AdminPanel.tsx` |
+| Charts en admin dashboard (SVG, sin libs) | ✅ `AdminPanel.tsx` MetricsTab |
+| `GET /metrics/history/{peer_id}` en server | ✅ `metrics/router.py` |
+| `GET /metrics/network-graph` en server | ✅ `metrics/router.py` |
+| `recorded_at` en MetricReport | ✅ `metrics/models.py` + `collector.py` |
+| Tab Gateway — rutas estáticas sin server | ✅ `RELAY_STATIC_ROUTES` env var |

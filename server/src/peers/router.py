@@ -51,6 +51,8 @@ class PeerRegistration(BaseModel):
     group: str = "default"
     invite_token: str | None = None
     transport: str = "udp"  # "udp" | "quic"
+    relay_capable: bool = False
+    relay_tags: list[str] = []  # "ephemeral" | "restricted" | "gateway"
 
 
 class PeerInfo(BaseModel):
@@ -63,6 +65,15 @@ class PeerInfo(BaseModel):
     group: str = "default"
     org_id: str = "dev"
     transport: str = "udp"  # "udp" | "quic"
+    relay_capable: bool = False
+    relay_tags: list[str] = []
+
+
+class RelayConfig(BaseModel):
+    relay_capable: bool
+    relay_tags: list[str] = []
+    relay_allowed_peers: list[str] = []
+    relay_allowed_groups: list[str] = []
 
 
 class ScopeConfig(BaseModel):
@@ -144,6 +155,7 @@ async def _snapshot(org_id: str, caller: CallerInfo) -> list[dict]:
                 continue
             
             last_seen = p.get("last_seen", "")
+            relay_tags_raw = p.get("relay_tags", "")
             result.append({
                 "peer_id": p["peer_id"],
                 "api_url": p["api_url"],
@@ -154,6 +166,8 @@ async def _snapshot(org_id: str, caller: CallerInfo) -> list[dict]:
                 "group": peer_group,
                 "org_id": org_id,
                 "transport": p.get("transport", "udp"),
+                "relay_capable": p.get("relay_capable", False),
+                "relay_tags": relay_tags_raw.split(",") if relay_tags_raw else [],
             })
     return result
 
@@ -200,10 +214,9 @@ async def register(
     effective_group = (
         caller.groups[0] if (settings.OIDC_ENABLED and caller.groups) else reg.group
     )
-
     driver = get_neo4j()
     now = datetime.now(timezone.utc).isoformat()
-    
+
     query = (
         "MERGE (p:Peer {peer_id: $peer_id, org_id: $org_id}) "
         "SET p += { "
@@ -213,11 +226,13 @@ async def register(
         "  last_seen: $last_seen, "
         "  network_hint: $network_hint, "
         "  group: $group, "
-        "  transport: $transport "
+        "  transport: $transport, "
+        "  relay_capable: $relay_capable, "
+        "  relay_tags: $relay_tags "
         "} "
         "RETURN p"
     )
-    
+
     async with driver.session() as session:
         await session.run(
             query,
@@ -230,6 +245,8 @@ async def register(
             network_hint=reg.network_hint,
             group=effective_group,
             transport=reg.transport,
+            relay_capable=reg.relay_capable,
+            relay_tags=",".join(reg.relay_tags),
         )
 
     await _broadcast(caller.org_id, caller)
@@ -243,6 +260,8 @@ async def register(
         group=effective_group,
         org_id=caller.org_id,
         transport=reg.transport,
+        relay_capable=reg.relay_capable,
+        relay_tags=reg.relay_tags,
     )
 
 
@@ -297,6 +316,86 @@ async def set_scopes(
     return body
 
 
+@router.get("/relay", response_model=PeerInfo)
+async def get_relay_peer(
+    target: str,
+    caller: CallerInfo = Depends(extract_auth),
+) -> PeerInfo:
+    """Return the best available relay peer to reach `target` (relay_capable=true, same org, online)."""
+    driver = get_neo4j()
+    timeout_s = get_settings().HEARTBEAT_TIMEOUT_S
+    query = (
+        "MATCH (p:Peer {org_id: $org_id}) "
+        "WHERE p.relay_capable = true "
+        "  AND p.peer_id <> $target "
+        "  AND p.peer_id <> $caller "
+        "RETURN p ORDER BY p.last_seen DESC LIMIT 1"
+    )
+    async with driver.session() as session:
+        result = await session.run(
+            query,
+            org_id=caller.org_id,
+            target=target,
+            caller=caller.peer_id or "",
+        )
+        record = await result.single()
+        if not record:
+            raise HTTPException(404, "No relay peer available")
+        p = record["p"]
+        last_seen = p.get("last_seen", "")
+        if not _compute_online(last_seen, timeout_s):
+            raise HTTPException(404, "No online relay peer available")
+        relay_tags_raw = p.get("relay_tags", "")
+        return PeerInfo(
+            peer_id=p["peer_id"],
+            api_url=p["api_url"],
+            udp_host=p["udp_host"],
+            udp_port=int(p["udp_port"]),
+            last_seen=last_seen,
+            online=True,
+            group=p.get("group", "default"),
+            org_id=caller.org_id,
+            transport=p.get("transport", "udp"),
+            relay_capable=True,
+            relay_tags=relay_tags_raw.split(",") if relay_tags_raw else [],
+        )
+
+
+@router.post("/{peer_id}/relay-config")
+async def update_relay_config(
+    peer_id: str,
+    body: RelayConfig,
+    caller: CallerInfo = Depends(extract_auth),
+) -> dict:
+    """Admin-only: configure relay settings for a peer (overrides the peer's self-declared values)."""
+    if get_settings().OIDC_ENABLED and not caller.is_admin:
+        raise HTTPException(403, "Admin required")
+    driver = get_neo4j()
+    query = (
+        "MATCH (p:Peer {peer_id: $peer_id, org_id: $org_id}) "
+        "SET p.relay_capable = $relay_capable, "
+        "    p.relay_tags = $relay_tags, "
+        "    p.relay_allowed_peers = $relay_allowed_peers, "
+        "    p.relay_allowed_groups = $relay_allowed_groups "
+        "RETURN p.peer_id as peer_id"
+    )
+    async with driver.session() as session:
+        result = await session.run(
+            query,
+            peer_id=peer_id,
+            org_id=caller.org_id,
+            relay_capable=body.relay_capable,
+            relay_tags=",".join(body.relay_tags),
+            relay_allowed_peers=",".join(body.relay_allowed_peers),
+            relay_allowed_groups=",".join(body.relay_allowed_groups),
+        )
+        record = await result.single()
+        if not record:
+            raise HTTPException(404, "Peer not found")
+    await _broadcast(caller.org_id, caller)
+    return {"status": "ok", "peer_id": peer_id}
+
+
 @router.get("/{peer_id}", response_model=PeerInfo)
 async def get_peer(
     peer_id: str,
@@ -315,6 +414,7 @@ async def get_peer(
         
         p = record["p"]
         last_seen = p.get("last_seen", "")
+        relay_tags_raw = p.get("relay_tags", "")
         return PeerInfo(
             peer_id=p["peer_id"],
             api_url=p["api_url"],
@@ -325,6 +425,8 @@ async def get_peer(
             group=p.get("group", "default"),
             org_id=p.get("org_id", caller.org_id),
             transport=p.get("transport", "udp"),
+            relay_capable=p.get("relay_capable", False),
+            relay_tags=relay_tags_raw.split(",") if relay_tags_raw else [],
         )
 
 

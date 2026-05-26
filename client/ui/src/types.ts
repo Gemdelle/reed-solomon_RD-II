@@ -8,6 +8,8 @@ export interface PeerInfo {
   transport?: "udp" | "quic";
   group: string;
   org_id: string;
+  relay_capable?: boolean;
+  relay_tags?: string[];
 }
 
 export interface FileMetadata {
@@ -20,11 +22,21 @@ export interface FileMetadata {
 
 export interface TransferResult {
   transfer_id: string;
-  status: "ok" | "degraded" | "failed" | "pending";
+  status: "ok" | "degraded" | "failed" | "pending" | "relayed";
   recovered_blocks: number;
   total_blocks: number;
   file_id: string | null;
   reason: string | null;
+  relay_tag?: string | null;
+  relay_target?: string | null;
+  via_relay?: boolean;
+}
+
+export interface RelayConfig {
+  relay_capable: boolean;
+  relay_tags: string[];
+  relay_allowed_peers: string[];
+  relay_allowed_groups: string[];
 }
 
 export interface RecommendationResponse {
@@ -112,4 +124,32 @@ export interface TransportRequest {
   requested_transport: "udp" | "quic";
   status: "pending" | "accepted" | "rejected";
   arrived_at: string;
+}
+
+export interface MetricSample {
+  peer_id: string;
+  target_peer_id: string;
+  rtt_ms: number;
+  jitter_ms: number;
+  loss_rate: number;
+  bandwidth_mbps: number | null;
+  recorded_at: string | null;
+}
+
+export interface MetricHistory {
+  peer_id: string;
+  samples: MetricSample[];
+}
+
+export interface NetworkEdge {
+  source: string;
+  target: string;
+  rtt_ms: number;
+  jitter_ms: number;
+  loss_rate: number;
+  updated_at: string | null;
+}
+
+export interface NetworkGraph {
+  edges: NetworkEdge[];
 }
