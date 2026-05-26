@@ -10,6 +10,9 @@ export interface PeerInfo {
   org_id: string;
   relay_capable?: boolean;
   relay_tags?: string[];
+  owner?: string | null;
+  incoming_policy?: string;
+  incoming_allowed_peers?: string[];
 }
 
 export interface FileMetadata {
@@ -110,6 +113,14 @@ export interface AgentConfig {
   storage_path: string;
   invite_token: string;
   network_hint: string;
+  incoming_policy: "allow_all" | "deny_all" | "allow_list" | "deny_list";
+  incoming_allowed_peers: string;
+  incoming_denied_peers: string;
+}
+
+export interface IncomingPolicyConfig {
+  incoming_policy: "allow_all" | "deny_all" | "allow_list";
+  incoming_allowed_peers: string[];
 }
 
 export interface ConfigUpdateResponse {

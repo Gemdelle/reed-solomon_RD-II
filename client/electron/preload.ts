@@ -22,4 +22,8 @@ contextBridge.exposeInMainWorld("rsAgent", {
     ipcRenderer.removeAllListeners("win-maximized");
     ipcRenderer.on("win-maximized", (_event, v: boolean) => callback(v));
   },
+  getLoginItemEnabled: (): Promise<boolean> =>
+    ipcRenderer.invoke("get-login-item"),
+  setLoginItemEnabled: (enabled: boolean): Promise<void> =>
+    ipcRenderer.invoke("set-login-item", enabled),
 });

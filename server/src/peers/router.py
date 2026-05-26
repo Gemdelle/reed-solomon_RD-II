@@ -53,6 +53,7 @@ class PeerRegistration(BaseModel):
     transport: str = "udp"  # "udp" | "quic"
     relay_capable: bool = False
     relay_tags: list[str] = []  # "ephemeral" | "restricted" | "gateway"
+    owner: str | None = None    # display name for multi-device grouping
 
 
 class PeerInfo(BaseModel):
@@ -67,6 +68,10 @@ class PeerInfo(BaseModel):
     transport: str = "udp"  # "udp" | "quic"
     relay_capable: bool = False
     relay_tags: list[str] = []
+    owner: str | None = None
+    # Server-admin-configured incoming policy (for headless peers)
+    incoming_policy: str = "allow_all"
+    incoming_allowed_peers: list[str] = []
 
 
 class RelayConfig(BaseModel):
@@ -74,6 +79,11 @@ class RelayConfig(BaseModel):
     relay_tags: list[str] = []
     relay_allowed_peers: list[str] = []
     relay_allowed_groups: list[str] = []
+
+
+class IncomingPolicyConfig(BaseModel):
+    incoming_policy: str = "allow_all"  # "allow_all"|"deny_all"|"allow_list"
+    incoming_allowed_peers: list[str] = []
 
 
 class ScopeConfig(BaseModel):
@@ -156,6 +166,7 @@ async def _snapshot(org_id: str, caller: CallerInfo) -> list[dict]:
             
             last_seen = p.get("last_seen", "")
             relay_tags_raw = p.get("relay_tags", "")
+            allowed_raw = p.get("incoming_allowed_peers", "")
             result.append({
                 "peer_id": p["peer_id"],
                 "api_url": p["api_url"],
@@ -168,6 +179,9 @@ async def _snapshot(org_id: str, caller: CallerInfo) -> list[dict]:
                 "transport": p.get("transport", "udp"),
                 "relay_capable": p.get("relay_capable", False),
                 "relay_tags": relay_tags_raw.split(",") if relay_tags_raw else [],
+                "owner": p.get("owner") or None,
+                "incoming_policy": p.get("incoming_policy", "allow_all"),
+                "incoming_allowed_peers": allowed_raw.split(",") if allowed_raw else [],
             })
     return result
 
@@ -214,6 +228,12 @@ async def register(
     effective_group = (
         caller.groups[0] if (settings.OIDC_ENABLED and caller.groups) else reg.group
     )
+    # Owner: in OIDC mode use the caller identity (preferred_username = peer_id for human users)
+    # In dev mode use the registration body, fallback to peer_id
+    effective_owner = (
+        caller.peer_id if (settings.OIDC_ENABLED and caller.peer_id) else (reg.owner or effective_peer_id)
+    )
+
     driver = get_neo4j()
     now = datetime.now(timezone.utc).isoformat()
 
@@ -228,7 +248,8 @@ async def register(
         "  group: $group, "
         "  transport: $transport, "
         "  relay_capable: $relay_capable, "
-        "  relay_tags: $relay_tags "
+        "  relay_tags: $relay_tags, "
+        "  owner: $owner "
         "} "
         "RETURN p"
     )
@@ -247,6 +268,7 @@ async def register(
             transport=reg.transport,
             relay_capable=reg.relay_capable,
             relay_tags=",".join(reg.relay_tags),
+            owner=effective_owner,
         )
 
     await _broadcast(caller.org_id, caller)
@@ -262,6 +284,7 @@ async def register(
         transport=reg.transport,
         relay_capable=reg.relay_capable,
         relay_tags=reg.relay_tags,
+        owner=effective_owner,
     )
 
 
@@ -361,6 +384,60 @@ async def get_relay_peer(
         )
 
 
+@router.get("/{peer_id}/incoming-policy")
+async def get_incoming_policy(
+    peer_id: str,
+    caller: CallerInfo = Depends(extract_auth),
+) -> dict:
+    """Return the admin-configured incoming transfer policy for a peer."""
+    driver = get_neo4j()
+    query = (
+        "MATCH (p:Peer {peer_id: $peer_id, org_id: $org_id}) "
+        "RETURN p.incoming_policy AS policy, p.incoming_allowed_peers AS allowed"
+    )
+    async with driver.session() as session:
+        result = await session.run(query, peer_id=peer_id, org_id=caller.org_id)
+        record = await result.single()
+        if not record:
+            raise HTTPException(404, "Peer not found")
+        allowed_raw = record["allowed"] or ""
+        return {
+            "incoming_policy": record["policy"] or "allow_all",
+            "incoming_allowed_peers": [p for p in allowed_raw.split(",") if p],
+        }
+
+
+@router.post("/{peer_id}/incoming-policy")
+async def update_incoming_policy(
+    peer_id: str,
+    body: IncomingPolicyConfig,
+    caller: CallerInfo = Depends(extract_auth),
+) -> dict:
+    """Admin-only: set the incoming transfer policy for a peer (typically a headless agent)."""
+    if get_settings().OIDC_ENABLED and not caller.is_admin:
+        raise HTTPException(403, "Admin required")
+    driver = get_neo4j()
+    query = (
+        "MATCH (p:Peer {peer_id: $peer_id, org_id: $org_id}) "
+        "SET p.incoming_policy = $policy, "
+        "    p.incoming_allowed_peers = $allowed "
+        "RETURN p.peer_id AS peer_id"
+    )
+    async with driver.session() as session:
+        result = await session.run(
+            query,
+            peer_id=peer_id,
+            org_id=caller.org_id,
+            policy=body.incoming_policy,
+            allowed=",".join(body.incoming_allowed_peers),
+        )
+        record = await result.single()
+        if not record:
+            raise HTTPException(404, "Peer not found")
+    await _broadcast(caller.org_id, caller)
+    return {"status": "ok", "peer_id": peer_id}
+
+
 @router.post("/{peer_id}/relay-config")
 async def update_relay_config(
     peer_id: str,
@@ -415,6 +492,7 @@ async def get_peer(
         p = record["p"]
         last_seen = p.get("last_seen", "")
         relay_tags_raw = p.get("relay_tags", "")
+        allowed_raw = p.get("incoming_allowed_peers", "")
         return PeerInfo(
             peer_id=p["peer_id"],
             api_url=p["api_url"],
@@ -427,6 +505,9 @@ async def get_peer(
             transport=p.get("transport", "udp"),
             relay_capable=p.get("relay_capable", False),
             relay_tags=relay_tags_raw.split(",") if relay_tags_raw else [],
+            owner=p.get("owner") or None,
+            incoming_policy=p.get("incoming_policy", "allow_all"),
+            incoming_allowed_peers=[x for x in allowed_raw.split(",") if x] if allowed_raw else [],
         )
 
 

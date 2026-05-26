@@ -6,6 +6,7 @@ import type {
   DeviceTokenInfo,
   FileMetadata,
   IncomingConnection,
+  IncomingPolicyConfig,
   InviteInfo,
   MetricHistory,
   NetworkGraph,
@@ -27,6 +28,8 @@ declare global {
       winMaximize?: () => void;
       winClose?: () => void;
       onMaximizeChange?: (callback: (isMaximized: boolean) => void) => void;
+      getLoginItemEnabled?: () => Promise<boolean>;
+      setLoginItemEnabled?: (enabled: boolean) => Promise<void>;
     };
   }
 }
@@ -142,6 +145,18 @@ export const serverApi = {
 
   updateRelayConfig: (peerId: string, cfg: RelayConfig) =>
     fetch(`${getServerUrl()}/peers/${encodeURIComponent(peerId)}/relay-config`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(cfg),
+    }).then((r) => json<{ status: string; peer_id: string }>(r)),
+
+  getIncomingPolicy: (peerId: string) =>
+    fetch(`${getServerUrl()}/peers/${encodeURIComponent(peerId)}/incoming-policy`, {
+      headers: authHeaders(),
+    }).then((r) => json<IncomingPolicyConfig>(r)),
+
+  updateIncomingPolicy: (peerId: string, cfg: IncomingPolicyConfig) =>
+    fetch(`${getServerUrl()}/peers/${encodeURIComponent(peerId)}/incoming-policy`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(cfg),

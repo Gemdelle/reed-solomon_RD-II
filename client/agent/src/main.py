@@ -27,6 +27,24 @@ _HEARTBEAT_INTERVAL_S = 15
 _auth_store: dict = {}
 
 
+async def _apply_server_incoming_policy(peer_id: str) -> None:
+    """Pull admin-configured incoming policy from the server and apply to config_store."""
+    try:
+        policy_data = await server_client.get_incoming_policy(peer_id)
+        if not policy_data:
+            return
+        changes: dict = {}
+        if "incoming_policy" in policy_data:
+            changes["incoming_policy"] = policy_data["incoming_policy"]
+        if "incoming_allowed_peers" in policy_data:
+            changes["incoming_allowed_peers"] = ",".join(policy_data["incoming_allowed_peers"])
+        if changes:
+            config_store.update(changes)
+            config_store.save()
+    except Exception:
+        pass
+
+
 async def _heartbeat_loop() -> None:
     consecutive_failures = 0
     while True:
@@ -93,6 +111,9 @@ async def lifespan(app: FastAPI):
         "storage_path": settings.STORAGE_PATH,
         "invite_token": settings.INVITE_TOKEN,
         "network_hint": settings.NETWORK_HINT,
+        "incoming_policy": settings.INCOMING_POLICY,
+        "incoming_allowed_peers": settings.INCOMING_ALLOWED_PEERS,
+        "incoming_denied_peers": settings.INCOMING_DENIED_PEERS,
     })
 
     await db.init_db(config_store.get("storage_path"))
@@ -109,14 +130,17 @@ async def lifespan(app: FastAPI):
 
     if settings.AGENT_SERVICE_TOKEN or config_store.get("invite_token", ""):
         try:
+            pid = config_store.get("peer_id", settings.PEER_ID)
             result = await server_client.register(
-                peer_id=config_store.get("peer_id", settings.PEER_ID),
+                peer_id=pid,
                 api_url=config_store.get("agent_api_url", "") or settings.AGENT_API_URL,
                 udp_host=_effective_advertise_host(),
                 udp_port=config_store.get("udp_port", settings.UDP_PORT),
                 transport=transport_mode,
             )
-            token_store.set_peer_id(result.get("peer_id", config_store.get("peer_id", settings.PEER_ID)))
+            registered_pid = result.get("peer_id", pid)
+            token_store.set_peer_id(registered_pid)
+            await _apply_server_incoming_policy(registered_pid)
         except Exception:
             pass
 
@@ -184,17 +208,26 @@ class TokenPayload(BaseModel):
     server_url: str | None = None
 
 
-def _peer_id_from_jwt(token: str, fallback: str) -> str:
+def _decode_jwt_claims(token: str) -> dict:
     try:
         import base64, json as _json
         parts = token.split(".")
         if len(parts) < 2:
-            return fallback
+            return {}
         padded = parts[1] + "=" * (-len(parts[1]) % 4)
-        claims = _json.loads(base64.urlsafe_b64decode(padded))
-        return claims.get("preferred_username") or claims.get("sub") or fallback
+        return _json.loads(base64.urlsafe_b64decode(padded))
     except Exception:
-        return fallback
+        return {}
+
+
+def _peer_id_from_jwt(token: str, fallback: str) -> str:
+    claims = _decode_jwt_claims(token)
+    return claims.get("preferred_username") or claims.get("sub") or fallback
+
+
+def _preferred_username_from_jwt(token: str) -> str | None:
+    claims = _decode_jwt_claims(token)
+    return claims.get("preferred_username") or None
 
 
 @app.post("/auth/token", tags=["auth"])
@@ -206,6 +239,8 @@ async def push_token(body: TokenPayload):
         config_store.save()
     settings = get_settings()
     peer_id = _peer_id_from_jwt(body.token, config_store.get("peer_id", settings.PEER_ID))
+    # preferred_username doubles as the owner display name for multi-device grouping
+    owner = _preferred_username_from_jwt(body.token)
     try:
         result = await server_client.register(
             peer_id=peer_id,
@@ -213,8 +248,11 @@ async def push_token(body: TokenPayload):
             udp_host=_effective_advertise_host(),
             udp_port=config_store.get("udp_port", settings.UDP_PORT),
             transport=config_store.get("transport_mode", settings.TRANSPORT_MODE),
+            owner=owner or settings.PEER_OWNER or None,
         )
-        token_store.set_peer_id(result.get("peer_id", peer_id))
+        registered_pid = result.get("peer_id", peer_id)
+        token_store.set_peer_id(registered_pid)
+        await _apply_server_incoming_policy(registered_pid)
     except Exception:
         pass
     return {"ok": True}
