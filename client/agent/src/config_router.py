@@ -3,7 +3,7 @@ from __future__ import annotations
 import socket
 from typing import Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 import config_store
@@ -106,7 +106,7 @@ async def get_config() -> FullConfigResponse:
 
 
 @router.put("", response_model=FullConfigUpdateResponse)
-async def update_config(body: FullConfigUpdateRequest) -> FullConfigUpdateResponse:
+async def update_config(body: FullConfigUpdateRequest, authorization: str | None = Header(None)) -> FullConfigUpdateResponse:
     settings = get_settings()
     changes = {k: v for k, v in body.model_dump().items() if v is not None}
 
@@ -133,28 +133,35 @@ async def update_config(body: FullConfigUpdateRequest) -> FullConfigUpdateRespon
         old_udp_host = old_snapshot.get("udp_host", settings.UDP_HOST)
         old_udp_port = old_snapshot.get("udp_port", settings.UDP_PORT)
 
-        old_transport = get_transport()
-        new_transport = QUICTransport() if new_mode == "quic" else UDPTransport()
-        old_transport.stop()
-        try:
-            set_transport(new_transport)
-            await new_transport.start(new_udp_host, new_udp_port)
-        except Exception as exc:
-            config_store.update(old_snapshot)
-            config_store.save()
-            set_transport(old_transport)
+        # Only rebind if at least one transport field actually changed
+        if (new_mode, new_udp_host, new_udp_port) == (old_mode, old_udp_host, old_udp_port):
+            needs_transport_rebind = False
+        else:
+            old_transport = get_transport()
+            new_transport = QUICTransport() if new_mode == "quic" else UDPTransport()
+            old_transport.stop()
             try:
-                await old_transport.start(old_udp_host, old_udp_port)
-            except Exception:
-                pass
-            raise HTTPException(status_code=500, detail=str(exc))
+                set_transport(new_transport)
+                await new_transport.start(new_udp_host, new_udp_port)
+            except Exception as exc:
+                config_store.update(old_snapshot)
+                config_store.save()
+                set_transport(old_transport)
+                try:
+                    await old_transport.start(old_udp_host, old_udp_port)
+                except Exception:
+                    pass
+                raise HTTPException(status_code=500, detail=str(exc))
 
-        token_store.set_transport_mode(new_mode)
+            token_store.set_transport_mode(new_mode)
 
     if "server_url" in changes:
         token_store.set_server_url(changes["server_url"])
 
+    auth_token: str | None = None
     if needs_reregister:
+        if authorization and authorization.startswith("Bearer "):
+            auth_token = authorization[7:]
         pid = token_store.get_peer_id() or config_store.get("peer_id", settings.PEER_ID)
         try:
             result = await server_client.register(
@@ -163,6 +170,7 @@ async def update_config(body: FullConfigUpdateRequest) -> FullConfigUpdateRespon
                 udp_host=_effective_advertise_host(),
                 udp_port=config_store.get("udp_port", settings.UDP_PORT),
                 transport=config_store.get("transport_mode", settings.TRANSPORT_MODE),
+                auth_token=auth_token,
             )
             token_store.set_peer_id(result.get("peer_id", pid))
         except Exception:

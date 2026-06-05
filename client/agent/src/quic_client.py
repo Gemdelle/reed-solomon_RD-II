@@ -46,7 +46,7 @@ class QuicClientProtocol(QuicConnectionProtocol):
                         future.set_exception(e)
 
 _TOKEN_POLL_INTERVAL = 0.5
-_TOKEN_TIMEOUT = 120.0
+_TOKEN_TIMEOUT = 30.0
 
 
 class ServerQuicClient:
