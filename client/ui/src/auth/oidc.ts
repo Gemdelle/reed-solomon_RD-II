@@ -8,6 +8,24 @@ import { UserManager, type UserManagerSettings, type User } from "oidc-client-ts
 
 let _manager: UserManager | null = null;
 
+/** Rewrite LAN-only Keycloak issuer to the reachable server host (e.g. Tailscale IP). */
+export function resolveOidcIssuer(serverUrl: string, issuer: string): string {
+  try {
+    const server = new URL(serverUrl);
+    const idp = new URL(issuer);
+    const isPrivate =
+      /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(idp.hostname) &&
+      !idp.hostname.startsWith("100.");
+    if (isPrivate && server.hostname !== idp.hostname) {
+      idp.hostname = server.hostname;
+      return idp.toString();
+    }
+  } catch {
+    // keep original issuer
+  }
+  return issuer;
+}
+
 export function initOidc(issuer: string, clientId: string, redirectUri: string): UserManager {
   const settings: UserManagerSettings = {
     authority: issuer,

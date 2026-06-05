@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { FileMetadata, PeerInfo, RecommendationResponse, TransferResult } from "../types";
 import { agentApi, serverApi } from "../api";
+import TransferAnimation from "./TransferAnimation";
 
 interface Props {
   peer: PeerInfo;
@@ -100,11 +101,11 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
       onClick={handleOverlayClick}
       className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
     >
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md">
+      <div className={`bird-panel rounded-2xl shadow-2xl w-full overflow-visible ${sending ? "max-w-2xl" : "max-w-md"}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
           <div>
-            <h2 className="text-sm font-medium text-slate-200">Enviar archivo</h2>
+            <h2 className="font-medium text-slate-200">Enviar archivo</h2>
             <p className="text-xs text-slate-500 mt-0.5 font-mono">→ {peer.peer_id}</p>
           </div>
           {!sending && (
@@ -113,7 +114,9 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
         </div>
 
         <div className="px-6 py-5 space-y-5">
-          {result ? (
+          {sending ? (
+            <TransferAnimation targetPeer={peer.peer_id} />
+          ) : result ? (
             /* ── Result ── */
             <div className="text-center py-4">
               <div className="text-4xl mb-3">
@@ -132,7 +135,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
               )}
               <button
                 onClick={() => onComplete(result)}
-                className="mt-5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-6 py-2 text-sm transition-colors"
+                className="bird-btn mt-5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-6 py-2 text-sm transition-colors"
               >
                 Cerrar
               </button>
@@ -254,17 +257,9 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                 <button
                   onClick={handleSend}
                   disabled={sending || !selectedFile}
-                  className="flex-1 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg py-2.5 text-sm font-medium transition-colors"
+                  className="bird-btn flex-1 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg py-2.5 text-sm font-medium transition-colors"
                 >
-                  {sending ? (
-                    <span className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
-                      </svg>
-                      Enviando…
-                    </span>
-                  ) : "Enviar"}
+                  Enviar
                 </button>
               </div>
             </>

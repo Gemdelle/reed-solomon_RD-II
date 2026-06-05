@@ -42,6 +42,15 @@ class Settings(BaseSettings):
             self.AGENT_API_URL = f"http://{_detect_local_ip()}:{self.AGENT_PORT}"
         return self
 
+    def advertised_udp_host(self) -> str:
+        """Bind address (0.0.0.0) is invalid as a send target — advertise a reachable IP."""
+        if self.UDP_HOST not in ("0.0.0.0", "::", ""):
+            return self.UDP_HOST
+        # Windows: sending UDP to the LAN IP often doesn't loop back to a local listener.
+        if os.name == "nt":
+            return "127.0.0.1"
+        return _detect_local_ip()
+
 
 @lru_cache
 def get_settings() -> Settings:

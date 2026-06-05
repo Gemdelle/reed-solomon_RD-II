@@ -36,7 +36,7 @@ async def _heartbeat_loop() -> None:
                     result = await server_client.register(
                         peer_id=settings.PEER_ID,
                         api_url=settings.AGENT_API_URL,
-                        udp_host=settings.UDP_HOST,
+                        udp_host=settings.advertised_udp_host(),
                         udp_port=settings.UDP_PORT,
                     )
                     token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI):
         result = await server_client.register(
             peer_id=settings.PEER_ID,
             api_url=settings.AGENT_API_URL,
-            udp_host=settings.UDP_HOST,
+            udp_host=settings.advertised_udp_host(),
             udp_port=settings.UDP_PORT,
         )
         token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))
@@ -126,7 +126,7 @@ async def push_token(body: TokenPayload):
         result = await server_client.register(
             peer_id=settings.PEER_ID,
             api_url=settings.AGENT_API_URL,
-            udp_host=settings.UDP_HOST,
+            udp_host=settings.advertised_udp_host(),
             udp_port=settings.UDP_PORT,
         )
         token_store.set_peer_id(result.get("peer_id", settings.PEER_ID))

@@ -154,7 +154,7 @@ function ScopesTab() {
         <button
           onClick={save}
           disabled={saving}
-          className="text-xs bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 transition-colors"
+          className="bird-btn text-xs bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 transition-colors"
         >
           {saving ? "Guardando…" : "Guardar cambios"}
         </button>
@@ -241,7 +241,7 @@ function InvitesTab() {
       <button
         onClick={generate}
         disabled={generating}
-        className="text-xs bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 transition-colors"
+        className="bird-btn text-xs bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 transition-colors"
       >
         {generating ? "Generando…" : "Generar invite"}
       </button>
@@ -418,7 +418,7 @@ function DeviceTokensTab() {
         <button
           onClick={create}
           disabled={creating || !label.trim()}
-          className="text-xs bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 transition-colors"
+          className="bird-btn text-xs bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg px-4 py-1.5 transition-colors"
         >
           {creating ? "Generando…" : "Crear token"}
         </button>
@@ -523,10 +523,10 @@ export default function AdminPanel({ onClose }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]">
+      <div className="bird-panel rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-          <h2 className="text-sm font-semibold text-slate-200">Panel de administración</h2>
+          <h2 className="font-semibold text-slate-200">Panel de administración</h2>
           <button
             onClick={onClose}
             className="text-slate-500 hover:text-slate-300 text-lg leading-none transition-colors"
