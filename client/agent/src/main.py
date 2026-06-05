@@ -129,8 +129,9 @@ async def lifespan(app: FastAPI):
         config_store.get("udp_port", 9001),
     )
 
-    # Eagerly connect to the server via QUIC (will poll for token when needed)
-    await server_client.start_quic()
+    # Eagerly connect to the server via QUIC (fire-and-forget — non blocking)
+    # The QUIC channel will be ready by the time the user completes SSO.
+    asyncio.create_task(server_client.start_quic())
 
     if settings.AGENT_SERVICE_TOKEN or config_store.get("invite_token", ""):
         try:
