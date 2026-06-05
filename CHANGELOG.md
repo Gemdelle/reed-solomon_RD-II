@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.0.0...v1.1.0) (2026-06-05)
+
+
+### Features
+
+* **ui:** UI update ([8c8e354](https://github.com/Gemdelle/reed-solomon_RD-II/commit/8c8e354ef46998c541707089c4408c11782144b4))
+
 # 1.0.0 (2026-05-23)
 
 
