@@ -1,4 +1,6 @@
 import type { PeerInfo } from "../types";
+import OnlineBird from "./OnlineBird";
+import bird2 from "../assets/bird-2.png";
 
 interface Props {
   peers: PeerInfo[];
@@ -55,11 +57,13 @@ function PeerRow({
   currentPeerId,
   currentOwner,
   onSend,
+  birdVariant,
 }: {
   peer: PeerInfo;
   currentPeerId: string;
   currentOwner: string | null;
   onSend: (peer: PeerInfo) => void;
+  birdVariant: number;
 }) {
   const status = getPeerStatus(peer);
   const transport = peer.transport ?? "udp";
@@ -69,7 +73,11 @@ function PeerRow({
 
   return (
     <li className="flex items-center gap-3 px-4 py-3 hover:bg-slate-800/40 transition-colors">
-      <div className={`w-2 h-2 rounded-full flex-shrink-0 ${STATUS_DOT[status]}`} />
+      {status === "online" ? (
+        <OnlineBird variant={birdVariant} size="sm" />
+      ) : (
+        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${STATUS_DOT[status]}`} />
+      )}
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
@@ -143,7 +151,7 @@ export default function PeerList({ peers, currentPeerId, onSend }: Props) {
 
   const header = (
     <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
-      <h2 className="text-sm font-medium text-slate-200">Peers de la red</h2>
+      <h2 className="font-medium text-slate-200">Peers de la red</h2>
       {peers.length > 0 && (
         <span className="text-xs text-slate-500">
           {online.length} online
@@ -155,11 +163,16 @@ export default function PeerList({ peers, currentPeerId, onSend }: Props) {
 
   if (peers.length === 0) {
     return (
-      <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+      <div className="bird-panel rounded-xl overflow-hidden">
         {header}
         <div className="px-4 py-10 text-center text-slate-600 text-sm">
-          <div className="text-3xl mb-2">📡</div>
-          Esperando peers… el agente se registra automáticamente al arrancar.
+          <img
+            src={bird2}
+            alt=""
+            className="h-10 w-10 mx-auto mb-3 object-contain animate-bird-bob opacity-60"
+          />
+          <p className="animate-gentle-pulse">Esperando peers…</p>
+          <p className="text-xs text-slate-700 mt-1">El agente se registra automáticamente al arrancar.</p>
         </div>
       </div>
     );
@@ -169,16 +182,17 @@ export default function PeerList({ peers, currentPeerId, onSend }: Props) {
 
   if (!hasOwners) {
     return (
-      <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+      <div className="bird-panel rounded-xl overflow-hidden">
         {header}
         <ul className="divide-y divide-slate-800/50">
-          {sorted.map((peer) => (
+          {sorted.map((peer, i) => (
             <PeerRow
               key={peer.peer_id}
               peer={peer}
               currentPeerId={currentPeerId}
               currentOwner={currentOwner}
               onSend={onSend}
+              birdVariant={i}
             />
           ))}
         </ul>
@@ -195,7 +209,7 @@ export default function PeerList({ peers, currentPeerId, onSend }: Props) {
   }
 
   return (
-    <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+    <div className="bird-panel rounded-xl overflow-hidden">
       {header}
       {Array.from(groups.entries()).map(([owner, groupPeers]) => {
         const isCurrentOwner = owner === currentOwner;
@@ -218,13 +232,14 @@ export default function PeerList({ peers, currentPeerId, onSend }: Props) {
               </span>
             </div>
             <ul className="divide-y divide-slate-800/50">
-              {groupPeers.map((peer) => (
+              {groupPeers.map((peer, i) => (
                 <PeerRow
                   key={peer.peer_id}
                   peer={peer}
                   currentPeerId={currentPeerId}
                   currentOwner={currentOwner}
                   onSend={onSend}
+                  birdVariant={i}
                 />
               ))}
             </ul>

@@ -448,7 +448,10 @@ async def _process_relay(req: ReceiveRequest) -> None:
 async def get_status(transfer_id: str) -> TransferResult:
     if transfer_id not in _transfers:
         raise HTTPException(404, "Transfer not found")
-    return TransferResult(**_transfers[transfer_id])
+    data = _transfers[transfer_id]
+    if data.get("status") == "pending":
+        return TransferResult(transfer_id=transfer_id, status=TransferStatus.pending)
+    return TransferResult(**data)
 
 
 @router.get("/history", response_model=list[HistoryEntry])

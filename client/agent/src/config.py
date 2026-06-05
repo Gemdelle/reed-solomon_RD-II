@@ -80,9 +80,12 @@ class Settings(BaseSettings):
         """Routable IP to register for UDP — explicit override wins, then auto-detect."""
         if self.UDP_ADVERTISE_HOST:
             return self.UDP_ADVERTISE_HOST
-        if self.UDP_HOST in ("0.0.0.0", "::"):
-            return _detect_local_ip()
-        return self.UDP_HOST
+        if self.UDP_HOST not in ("0.0.0.0", "::", ""):
+            return self.UDP_HOST
+        # Windows: sending UDP to the LAN IP often doesn't loop back to a local listener.
+        if os.name == "nt":
+            return "127.0.0.1"
+        return _detect_local_ip()
 
 
 @lru_cache

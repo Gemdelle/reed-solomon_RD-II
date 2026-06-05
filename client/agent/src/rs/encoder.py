@@ -25,6 +25,8 @@ from reedsolo import RSCodec
 
 HEADER_FMT = "!16sIIBBBBQ"
 HEADER_SIZE = struct.calcsize(HEADER_FMT)  # 36 bytes
+# IPv4 UDP payload limit; datagrams larger than this are dropped by the OS.
+MAX_UDP_PAYLOAD = 65_507 - HEADER_SIZE
 
 _FLAG_LAST = 0x01
 _FLAG_PAD = 0x02
@@ -46,12 +48,19 @@ def encode_file(
     """
     n, k = derive_rs_params(redundancy_level)
     nsym = n - k
-    rs = RSCodec(nsym)
-
-    transfer_id = uuid4().bytes
     file_size = len(file_bytes)
 
-    chunk_size = max(1, math.ceil(file_size / k))
+    # Grow k (and n to keep parity count) until each datagram fits the UDP limit.
+    chunk_size = max(1, math.ceil(file_size / k)) if file_size else 1
+    while chunk_size > MAX_UDP_PAYLOAD and k + nsym <= 250:
+        k += 1
+        if k >= n:
+            n = k + nsym
+        chunk_size = max(1, math.ceil(file_size / k))
+
+    nsym = n - k
+    rs = RSCodec(nsym)
+    transfer_id = uuid4().bytes
     padded_size = chunk_size * k
     padded = file_bytes + b"\x00" * (padded_size - file_size)
     has_padding = file_size < padded_size

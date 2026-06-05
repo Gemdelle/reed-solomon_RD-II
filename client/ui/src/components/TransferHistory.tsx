@@ -1,4 +1,5 @@
 import type { TransferResult } from "../types";
+import bird1 from "../assets/bird-1.png";
 
 interface Props {
   transfers: TransferResult[];
@@ -15,23 +16,27 @@ const STATUS_CONFIG = {
 export default function TransferHistory({ transfers }: Props) {
   if (transfers.length === 0) {
     return (
-      <div className="bg-slate-900 rounded-xl border border-slate-800 px-4 py-6 text-center text-slate-600 text-sm">
-        <div className="text-2xl mb-1">📋</div>
-        Historial de transferencias
+      <div className="bird-panel rounded-xl px-4 py-6 text-center text-slate-600 text-sm">
+        <img
+          src={bird1}
+          alt=""
+          className="h-8 w-8 mx-auto mb-2 object-contain opacity-40 animate-scan"
+        />
+        <p>Historial de transferencias</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+    <div className="bird-panel rounded-xl overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-800">
-        <h2 className="text-sm font-medium text-slate-200">Historial</h2>
+        <h2 className="font-medium text-slate-200">Historial</h2>
       </div>
       <ul className="divide-y divide-slate-800/50 max-h-48 overflow-auto">
         {transfers.map((t) => {
           const cfg = STATUS_CONFIG[t.status] ?? STATUS_CONFIG.pending;
           return (
-            <li key={t.transfer_id} className={`flex items-center gap-3 px-4 py-2.5 border-l-2 ${cfg.bg}`}>
+            <li key={t.transfer_id} className={`flex items-center gap-3 px-4 py-2.5 border-l-2 transition-all duration-300 hover:pl-5 ${cfg.bg}`}>
               <span className="text-base leading-none">{cfg.icon}</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">

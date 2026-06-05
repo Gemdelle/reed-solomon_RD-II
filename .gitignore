@@ -43,6 +43,13 @@ build/
 # Datos locales (fileserver storage)
 services/fileserver/data/
 
+# Herramientas locales de desarrollo (binarios, no versionar)
+.tools/
+
+# Volcados de Redis
+dump.rdb
+**/dump.rdb
+
 # Electron packaging — frozen agent bundle and build output
 client/resources/agent/*
 !client/resources/agent/.gitkeep
