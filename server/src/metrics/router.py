@@ -21,11 +21,18 @@ async def report_metrics(report: MetricReport) -> dict:
 
 @router.get("/recommendation/{peer_id}", response_model=RecommendationResponse)
 async def get_recommendation(peer_id: str) -> RecommendationResponse:
-    avg = await get_average(peer_id)
+    # 1. Get averages from Neo4j (towards server)
+    avg = await get_average(peer_id, target_id="server")
 
-    r = get_redis()
-    peer_data = await r.hgetall(f"peer:{peer_id}")
-    network_hint = peer_data.get("network_hint", "auto") or "auto"
+    # 2. Get network hint from Neo4j Peer node
+    driver = get_neo4j()
+    network_hint = "auto"
+    query = "MATCH (p:Peer {peer_id: $peer_id}) RETURN p.network_hint as hint"
+    async with driver.session() as session:
+        result = await session.run(query, peer_id=peer_id)
+        record = await result.single()
+        if record:
+            network_hint = record["hint"] or "auto"
 
     if not avg:
         return RecommendationResponse(
@@ -52,16 +59,31 @@ async def get_recommendation(peer_id: str) -> RecommendationResponse:
 
 
 @router.get("/history/{peer_id}")
-async def get_metric_history(peer_id: str) -> dict:
-    """Return the last N raw metric samples for a peer (oldest-first)."""
-    r = get_redis()
-    key = f"metrics:{peer_id}"
-    items_raw = await r.lrange(key, 0, -1)
-    if not items_raw:
-        return {"peer_id": peer_id, "samples": []}
-    # LPUSH stores newest at index 0 → reverse to get chronological order
-    samples = [MetricReport.model_validate_json(raw).model_dump() for raw in reversed(items_raw)]
-    return {"peer_id": peer_id, "samples": samples}
+async def get_metric_history(peer_id: str, target_id: str = "server", limit: int = 50) -> dict:
+    """Return the last N raw metric samples for a peer (oldest-first) from Neo4j."""
+    driver = get_neo4j()
+    
+    if target_id == "server":
+        query = (
+            "MATCH (p:Peer {peer_id: $peer_id})-[:REPORTED_TO_SERVER]->(m:MetricSample) "
+            "RETURN m.rtt_ms as rtt_ms, m.jitter_ms as jitter_ms, "
+            "       m.loss_rate as loss_rate, toString(m.timestamp) as recorded_at "
+            "ORDER BY m.timestamp DESC LIMIT $limit"
+        )
+    else:
+        query = (
+            "MATCH (p:Peer {peer_id: $peer_id})-[:REPORTED_P2P {target_id: $target_id}]->(m:MetricSample) "
+            "RETURN m.rtt_ms as rtt_ms, m.jitter_ms as jitter_ms, "
+            "       m.loss_rate as loss_rate, toString(m.timestamp) as recorded_at "
+            "ORDER BY m.timestamp DESC LIMIT $limit"
+        )
+
+    async with driver.session() as session:
+        result = await session.run(query, peer_id=peer_id, target_id=target_id, limit=limit)
+        records = await result.data()
+        # Records are newest-first due to DESC, reverse to get oldest-first
+        samples = list(reversed(records))
+        return {"peer_id": peer_id, "target_id": target_id, "samples": samples}
 
 
 @router.get("/network-graph")

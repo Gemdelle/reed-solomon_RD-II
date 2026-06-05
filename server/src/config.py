@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     # Headless agent service accounts
     AGENT_SERVICE_TOKEN: str = ""
 
+    # QUIC Server
+    QUIC_ENABLED: bool = True
+    QUIC_HOST: str = "0.0.0.0"
+    QUIC_PORT: int = 9000
+    # Paths for self-signed or provided certs
+    QUIC_CERT_PATH: str = "certs/server.crt"
+    QUIC_KEY_PATH: str = "certs/server.key"
+
     model_config = {"env_file": ".env"}
 
 

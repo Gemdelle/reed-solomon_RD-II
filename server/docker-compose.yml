@@ -34,6 +34,7 @@ services:
     build: .
     ports:
       - "8080:8080"
+      - "9000:9000/udp"
     env_file: ../.env
     environment:
       REDIS_URL: redis://redis:6379/0

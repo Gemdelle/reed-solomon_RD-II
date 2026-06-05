@@ -34,18 +34,12 @@ class CallerInfo:
         self.is_admin: bool = is_service or admin_group in self.groups
 
 
-async def extract_auth(
-    authorization: str | None = Header(default=None),
-) -> CallerInfo:
+async def authenticate(token: str) -> CallerInfo:
+    """Core authentication logic usable by REST and QUIC."""
     settings = get_settings()
 
     if not settings.OIDC_ENABLED:
         return CallerInfo(peer_id=None, is_service=False, org_id="dev")
-
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Authorization header required")
-
-    token = authorization.removeprefix("Bearer ").strip()
 
     # Legacy shared service token (kept for backward compat / CI scripts)
     if settings.AGENT_SERVICE_TOKEN and token == settings.AGENT_SERVICE_TOKEN:
@@ -62,6 +56,8 @@ async def extract_auth(
         )
 
     # OIDC JWT (human users via Keycloak)
+    if not token:
+        raise ValueError("Token is empty")
     try:
         payload = verify_token(token)
         peer_id = payload.get("preferred_username") or payload.get("sub")
@@ -72,4 +68,21 @@ async def extract_auth(
             groups=groups_from_payload(payload),
         )
     except jwt.PyJWTError as exc:
-        raise HTTPException(401, f"Invalid token: {exc}")
+        raise ValueError(f"Invalid token: {exc}")
+
+
+async def extract_auth(
+    authorization: str | None = Header(default=None),
+) -> CallerInfo:
+    settings = get_settings()
+    if not settings.OIDC_ENABLED:
+        return await authenticate("")
+
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Authorization header required")
+
+    token = authorization.removeprefix("Bearer ").strip()
+    try:
+        return await authenticate(token)
+    except ValueError as e:
+        raise HTTPException(401, str(e))

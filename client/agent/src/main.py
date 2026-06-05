@@ -52,6 +52,11 @@ async def _heartbeat_loop() -> None:
         settings = get_settings()
         pid = token_store.get_peer_id() or config_store.get("peer_id", settings.PEER_ID)
 
+        # Skip heartbeat if we don't have a token yet (SSO not completed)
+        token = token_store.get_token()
+        if not token and not settings.AGENT_SERVICE_TOKEN:
+            continue
+
         async def _reregister() -> None:
             try:
                 transport = token_store.get_transport_mode() or config_store.get("transport_mode", settings.TRANSPORT_MODE)
@@ -70,15 +75,11 @@ async def _heartbeat_loop() -> None:
         try:
             await server_client.heartbeat(pid)
             consecutive_failures = 0
-        except httpx.HTTPStatusError as exc:
-            consecutive_failures += 1
-            if exc.response.status_code == 404:
-                await _reregister()
-                consecutive_failures = 0
-        except Exception:
+        except Exception as e:
             consecutive_failures += 1
             if consecutive_failures >= 2:
                 await _reregister()
+                consecutive_failures = 0
 
 
 def _effective_advertise_host() -> str:
@@ -127,6 +128,9 @@ async def lifespan(app: FastAPI):
         config_store.get("udp_host", "0.0.0.0"),
         config_store.get("udp_port", 9001),
     )
+
+    # Eagerly connect to the server via QUIC (will poll for token when needed)
+    await server_client.start_quic()
 
     if settings.AGENT_SERVICE_TOKEN or config_store.get("invite_token", ""):
         try:

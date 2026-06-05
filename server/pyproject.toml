@@ -10,6 +10,7 @@ dependencies = [
     "PyJWT[crypto]>=2.8",
     "neo4j>=5.0",
     "httpx>=0.28.1",
+    "aioquic>=1.0.0",
 ]
 
 [dependency-groups]

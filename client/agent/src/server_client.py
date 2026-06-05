@@ -1,26 +1,45 @@
 from __future__ import annotations
-
-import httpx
+import urllib.parse
+import logging
+from typing import Optional
 
 import token_store
 import config_store as _config_store
 from config import get_settings
+from quic_client import ServerQuicClient
 
 _DEFAULT_REDUNDANCY = 0.25
-
+logger = logging.getLogger(__name__)
 
 class ServerClient:
     def __init__(self) -> None:
         self._settings = get_settings()
+        self._quic_instance: Optional[ServerQuicClient] = None
+        self._last_quic_base: Optional[str] = None
 
     @property
     def _base(self) -> str:
         return token_store.get_server_url() or self._settings.SERVER_URL
 
     @property
-    def _auth_headers(self) -> dict[str, str]:
-        token = self._settings.AGENT_SERVICE_TOKEN or token_store.get_token()
-        return {"Authorization": f"Bearer {token}"} if token else {}
+    def _quic(self) -> ServerQuicClient:
+        base = self._base
+        if self._quic_instance is None or self._last_quic_base != base:
+            u = urllib.parse.urlparse(base)
+            self._quic_instance = ServerQuicClient(u.hostname or "localhost", 9000)
+            self._last_quic_base = base
+        return self._quic_instance
+
+    @property
+    def _token(self) -> str | None:
+        return self._settings.AGENT_SERVICE_TOKEN or token_store.get_token()
+
+    async def start_quic(self) -> None:
+        """Eagerly establish the QUIC server connection at startup."""
+        try:
+            await self._quic.start()
+        except Exception:
+            logger.warning("QUIC early connect failed — will retry on first call")
 
     async def register(
         self,
@@ -31,7 +50,7 @@ class ServerClient:
         transport: str = "udp",
         owner: str | None = None,
     ) -> dict:
-        body: dict = {
+        params: dict = {
             "peer_id": peer_id,
             "api_url": api_url,
             "udp_host": udp_host,
@@ -43,77 +62,47 @@ class ServerClient:
         }
         try:
             invite = _config_store.get("invite_token", "") or self._settings.INVITE_TOKEN
-            body["network_hint"] = _config_store.get("network_hint", self._settings.NETWORK_HINT)
+            params["invite_token"] = invite
+            params["network_hint"] = _config_store.get("network_hint", self._settings.NETWORK_HINT)
         except Exception:
-            invite = self._settings.INVITE_TOKEN
-            body["network_hint"] = self._settings.NETWORK_HINT
-        if invite:
-            body["invite_token"] = invite
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
-            r = await c.post(
-                f"{self._base}/peers/register",
-                json=body,
-                headers=self._auth_headers,
-            )
-            r.raise_for_status()
-            return r.json()
+            params["invite_token"] = self._settings.INVITE_TOKEN
+            params["network_hint"] = self._settings.NETWORK_HINT
+            
+        return await self._quic.call("peers.register", params, self._token)
 
     async def heartbeat(self, peer_id: str) -> None:
-        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
-            r = await c.post(
-                f"{self._base}/peers/{peer_id}/heartbeat",
-                headers=self._auth_headers,
-            )
-            r.raise_for_status()
+        await self._quic.call("peers.heartbeat", {"peer_id": peer_id}, self._token)
 
     async def get_peers(self) -> list[dict]:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
-            r = await c.get(f"{self._base}/peers", headers=self._auth_headers)
-            r.raise_for_status()
-            return r.json()
+        return await self._quic.call("peers.list", {}, self._token)
 
     async def get_peer(self, peer_id: str) -> dict:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as c:
-            r = await c.get(f"{self._base}/peers/{peer_id}", headers=self._auth_headers)
-            if r.status_code == 404:
-                raise ValueError(f"Peer {peer_id!r} not found on server")
-            r.raise_for_status()
-            return r.json()
+        return await self._quic.call("peers.get", {"peer_id": peer_id}, self._token)
 
     async def report_metrics(
         self, peer_id: str, rtt_ms: float, jitter_ms: float, loss_rate: float, target_peer_id: str = "server"
     ) -> None:
-        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
-            await c.post(
-                f"{self._base}/metrics/report",
-                json={
-                    "peer_id": peer_id,
-                    "target_peer_id": target_peer_id,
-                    "rtt_ms": rtt_ms,
-                    "jitter_ms": jitter_ms,
-                    "loss_rate": loss_rate
-                },
-                headers=self._auth_headers,
-            )
+        params = {
+            "peer_id": peer_id,
+            "target_peer_id": target_peer_id,
+            "rtt_ms": rtt_ms,
+            "jitter_ms": jitter_ms,
+            "loss_rate": loss_rate
+        }
+        await self._quic.call("metrics.report", params, self._token)
 
     async def get_full_recommendation(self, peer_id: str) -> dict:
         """Returns {redundancy_level, quality, profile_name, based_on_samples}."""
         try:
-            async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
-                r = await c.get(
-                    f"{self._base}/metrics/recommendation/{peer_id}",
-                    headers=self._auth_headers,
-                )
-                if r.status_code == 200:
-                    return r.json()
-        except Exception:
-            pass
-        return {
-            "redundancy_level": _DEFAULT_REDUNDANCY,
-            "quality": "unknown",
-            "profile_name": "unknown",
-            "based_on_samples": 0,
-        }
+            return await self._quic.call("metrics.recommendation", {"peer_id": peer_id}, self._token)
+        except Exception as e:
+            logger.error(f"Failed to get recommendation via QUIC: {e}")
+            return {
+                "redundancy_level": _DEFAULT_REDUNDANCY,
+                "quality": "unknown",
+                "profile_name": "unknown",
+                "based_on_samples": 0,
+            }
 
     async def get_recommendation(self, peer_id: str) -> float:
         rec = await self.get_full_recommendation(peer_id)
@@ -121,28 +110,13 @@ class ServerClient:
 
     async def get_incoming_policy(self, peer_id: str) -> dict:
         """Fetch the server-side incoming policy for this peer (admin-configured)."""
-        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
-            r = await c.get(
-                f"{self._base}/peers/{peer_id}/incoming-policy",
-                headers=self._auth_headers,
-            )
-            if r.status_code == 404:
-                return {}
-            r.raise_for_status()
-            return r.json()
+        try:
+            return await self._quic.call("peers.incoming_policy", {"peer_id": peer_id}, self._token)
+        except Exception:
+            return {}
 
     async def get_relay_for_peer(self, target_id: str) -> dict:
         """Ask the server for the best relay peer to reach target_id."""
-        async with httpx.AsyncClient(timeout=5, follow_redirects=True) as c:
-            r = await c.get(
-                f"{self._base}/peers/relay",
-                params={"target": target_id},
-                headers=self._auth_headers,
-            )
-            if r.status_code == 404:
-                raise ValueError(f"No relay available for target {target_id!r}")
-            r.raise_for_status()
-            return r.json()
-
+        return await self._quic.call("peers.relay", {"target": target_id}, self._token)
 
 server_client = ServerClient()

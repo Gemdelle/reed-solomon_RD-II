@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,10 +10,13 @@ from metrics.router import router as metrics_router
 from peers.router import router as peers_router
 from peers.routing import router as routing_router
 from neo4j_client import close_neo4j
+from quic_server import start_quic_server
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Start QUIC server in the background
+    asyncio.create_task(start_quic_server())
     yield
     await close_neo4j()
 
