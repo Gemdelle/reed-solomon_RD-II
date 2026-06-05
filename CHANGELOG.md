@@ -1,3 +1,10 @@
+# [1.1.0-beta.11](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.10...v1.1.0-beta.11) (2026-06-05)
+
+
+### Bug Fixes
+
+* token_store es en memoria — si el proceso del agente se reinicia (ej. al cerrar/reabrir la app), el token se pierde. El UI lo tiene en localStorage y lo envía en cada request HTTP, pero el agente lo ignoraba para los endpoints de peers y config. Ahora lo lee del header y lo usa directamente en el QUIC call. ([cd5649a](https://github.com/Gemdelle/reed-solomon_RD-II/commit/cd5649a92fe47aaede501c144aca15346df356e8))
+
 # [1.1.0-beta.10](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.9...v1.1.0-beta.10) (2026-06-05)
 
 
