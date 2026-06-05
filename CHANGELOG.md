@@ -1,3 +1,10 @@
+# [1.1.0-beta.9](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.8...v1.1.0-beta.9) (2026-06-05)
+
+
+### Bug Fixes
+
+* QUIC streams as default server conn ([1e6be80](https://github.com/Gemdelle/reed-solomon_RD-II/commit/1e6be80573afc4bc8460ebb638bdbdef2efe8c01))
+
 # [1.1.0-beta.8](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.7...v1.1.0-beta.8) (2026-05-26)
 
 
