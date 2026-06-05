@@ -1,3 +1,10 @@
+# [1.1.0-beta.10](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.9...v1.1.0-beta.10) (2026-06-05)
+
+
+### Bug Fixes
+
+*  start_quic() ahora se lanza como asyncio.create_task() en lugar de await, para que no bloquee el startup del agente ([6ea6162](https://github.com/Gemdelle/reed-solomon_RD-II/commit/6ea6162f4c0ccb897014fb0b8d43b3aa5b077ecf))
+
 # [1.1.0-beta.9](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.8...v1.1.0-beta.9) (2026-06-05)
 
 
