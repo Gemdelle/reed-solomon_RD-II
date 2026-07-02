@@ -13,6 +13,7 @@ from pydantic import BaseModel
 import config_store
 from config import get_settings
 from config_router import router as config_router
+from demo.router import router as demo_router
 from files.router import router as files_router
 from metrics.probe import rtt_probe_loop
 from peers.router import router as peers_router
@@ -173,6 +174,7 @@ app.add_middleware(
 )
 
 app.include_router(config_router, prefix="/config", tags=["config"])
+app.include_router(demo_router, prefix="/demo", tags=["demo"])
 app.include_router(files_router, prefix="/files", tags=["files"])
 app.include_router(peers_router, prefix="/peers", tags=["peers"])
 app.include_router(transfers_router, prefix="/transfer", tags=["transfer"])

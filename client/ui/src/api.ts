@@ -3,6 +3,7 @@ import type {
   AuthConfig,
   ConfigUpdateResponse,
   DeviceTokenCreate,
+  DemoResult,
   DeviceTokenInfo,
   FileMetadata,
   IncomingConnection,
@@ -197,6 +198,19 @@ export const agentApi = {
       method: "DELETE",
       headers: authHeaders(),
     }).then((r) => json<{ deleted: string }>(r)),
+
+  // Demo mode: simulate an RS transfer with packet loss over an image
+  simulateDemo: (file: File, redundancyLevel: number, lossRate: number) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("redundancy_level", String(redundancyLevel));
+    fd.append("loss_rate", String(lossRate));
+    return fetch(`${getAgentUrl()}/demo/simulate`, {
+      method: "POST",
+      body: fd,
+      headers: authHeaders(),
+    }).then((r) => json<DemoResult>(r));
+  },
 
   // Peers (proxied from server via agent)
   listPeers: () =>

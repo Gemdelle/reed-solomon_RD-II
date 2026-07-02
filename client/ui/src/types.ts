@@ -23,6 +23,29 @@ export interface FileMetadata {
   created_at: string;
 }
 
+export interface DemoResult {
+  status: "ok" | "degraded" | "failed" | "pending" | "relayed";
+  reason: string | null;
+  width: number;
+  height: number;
+  n: number;
+  k: number;
+  parity: number;
+  redundancy_level: number;
+  loss_rate: number;
+  blocks_total: number;
+  blocks_dropped: number;
+  blocks_arrived: number;
+  data_lost: number;
+  parity_lost: number;
+  recovered_blocks: number;
+  needed_blocks: number;
+  max_recoverable: number;
+  original_png: string;
+  naive_png: string;
+  rs_png: string | null;
+}
+
 export interface TransferResult {
   transfer_id: string;
   status: "ok" | "degraded" | "failed" | "pending" | "relayed";
