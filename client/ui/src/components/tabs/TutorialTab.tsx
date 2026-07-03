@@ -246,10 +246,10 @@ interface Step {
 
 const STEPS: Step[] = [
   {
-    title: "Reed-Solomon, la base",
+    title: "BASE DE ROCKDOVE",
     points: [
-      "RockDove envía archivos entre peers y corrige errores con Reed-Solomon.",
-      "Esta imagen es la que vamos a mandar.",
+      "reconstruir imagen con Reed-Solomon",
+      "flujo teórico y práctico",
     ],
     visual: (
       <div className="flex items-center gap-4">
@@ -259,18 +259,17 @@ const STEPS: Step[] = [
     ),
   },
   {
-    title: "Se parte en 32 bloques",
+    title: "ARCHIVO",
     points: [
-      "El archivo no viaja como una sola cosa.",
-      "Se corta en 32 bloques que viajan por separado.",
+      "se parte en 32 bloques",
     ],
     visual: <DotGrid data={32} parity={0} />,
   },
   {
-    title: "Datos y paridad",
+    title: "DATOS Y PARIDAD",
     points: [
-      "Datos: pedazos reales del archivo.",
-      "Paridad: respaldo calculado, «comodines» para recalcular lo que falte.",
+      "bloques de datos",
+      "bloques de paridad: respaldo calculados matemáticamente para reconstruir",
     ],
     visual: (
       <div className="space-y-2">
@@ -283,10 +282,10 @@ const STEPS: Step[] = [
     ),
   },
   {
-    title: "La propiedad clave",
+    title: "PROPIEDAD CLAVE",
     points: [
-      "No importa cuáles bloques lleguen.",
-      "Con que lleguen suficientes, se reconstruye la imagen completa.",
+      "no importa cuáles",
+      "importa cuántos",
     ],
     visual: (
       <div className="flex items-center gap-3">
@@ -303,17 +302,26 @@ const STEPS: Step[] = [
     ),
   },
   {
-    title: "El flujo de envío",
+    title: "FLUJO",
     points: [
-      "Elegís peer destino, archivo y transporte.",
-      "El receptor tiene que aceptar (política de aceptación).",
-      "Aceptado, los bloques van directo entre peers.",
+      "Peer destino",
+      "Archivo o imagen",
+      "Transporte por el que van a viajar los bloques",
+      "Política de aceptación",
+      "Bloques viajan entre peers",
+      "Servidor coordina, NO transporta",
     ],
     visual: <PeerFlow />,
   },
   {
-    title: "El canal: UDP o QUIC",
-    points: ["Los bloques viajan por UDP o por QUIC en modo datagrama."],
+    title: "CANAL",
+    points: [
+      "UDP: rápido sin garantizar orden, NO reenvía automáticamente",
+      "Reed-Solomon recupera",
+      "QUIC: sobre UDP con ventajas modernas",
+      "Coordinación por streams",
+      "Datagrams para datos, NO reenvía",
+    ],
     visual: (
       <div className="flex gap-3">
         <TransportCard
@@ -336,20 +344,23 @@ const STEPS: Step[] = [
     ),
   },
   {
-    title: "Redundancia (manual o adaptativa)",
+    title: "REDUNDANCIA",
     points: [
-      "Redundancia = % de respaldo. La paridad son esos bloques.",
-      "25% → 24 datos + 8 paridad → tolera hasta 8 pérdidas.",
-      "Adaptativa: se ajusta según pérdida, latencia y jitter.",
+      "Redundancia: % de respaldo agregado al archivo",
+      "Paridad: bloques generados a partir de % de redundancia",
+      "Ejemplo: R 25% → 32 (24D + 8P)",
+      "Tolera hasta 8 pérdidas",
+      "R adaptativa: según condiciones de red (pérdida, latencia, jitter)",
+      "Cantidad de redundancia",
     ],
     visual: <RedundancyDonut />,
   },
   {
-    title: "Los tres estados",
+    title: "LOS 3 ESTADOS",
     points: [
-      "OK: llegó bien.",
-      "DEGRADED: hubo pérdida, pero Reed-Solomon reconstruyó.",
-      "FAILED: se perdió más de lo que la paridad cubría.",
+      "OK: sin reconstrucción",
+      "DEGRADED: hubo pérdida y reconstrucción",
+      "FAILED: se perdió más de lo que la paridad cubría",
     ],
     visual: (
       <div className="flex gap-3">
@@ -360,11 +371,13 @@ const STEPS: Step[] = [
     ),
   },
   {
-    title: "💡 ¿Por qué a veces recupera menos?",
+    title: "¿POR QUÉ A VECES RECUPERA MENOS?",
     points: [
-      "Si se pierden 6 pero recupera 3, no está mal.",
-      "Algunos perdidos eran de paridad, y esos no siempre hacen falta.",
-      "En failed puede figurar 0: no había info suficiente.",
+      "Pérdida: 6",
+      "Recuperados: 3",
+      "Tipos de bloques",
+      "Reconstrucción necesaria",
+      "Menos bloques que el mínimo",
     ],
     visual: (
       <div className="flex flex-col gap-2">
@@ -384,7 +397,7 @@ const STEPS: Step[] = [
     ),
   },
   {
-    title: "Y ahora, la demo en vivo",
+    title: "DEMO",
     points: ["Pasamos a verlo funcionando con dos peers reales."],
     visual: (
       <div className="flex items-center gap-3">
@@ -439,9 +452,12 @@ function Quadrant({
         <h2 className="text-xl leading-snug">{step.title}</h2>
       </div>
 
-      <ul className="mt-3 flex-shrink-0 space-y-2 px-1 text-center text-lg leading-relaxed text-slate-200">
+      <ul className="mt-3 flex-shrink-0 space-y-2 px-1 text-left text-lg leading-relaxed text-slate-200">
         {step.points.map((p) => (
-          <li key={p}>{p}</li>
+          <li key={p} className="flex items-start gap-2.5">
+            <span className="mt-2 h-2.5 w-2.5 flex-shrink-0 bg-brand-400 shadow-[0_0_6px_rgba(129,140,248,0.7)]" />
+            <span>{p}</span>
+          </li>
         ))}
       </ul>
 
