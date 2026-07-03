@@ -1,3 +1,10 @@
+# [1.1.0-beta.13](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.12...v1.1.0-beta.13) (2026-07-03)
+
+
+### Bug Fixes
+
+* tutorial tab. ([9df9948](https://github.com/Gemdelle/reed-solomon_RD-II/commit/9df99484a553801763d355c611ab7287835fbf41))
+
 # [1.1.0-beta.12](https://github.com/Gemdelle/reed-solomon_RD-II/compare/v1.1.0-beta.11...v1.1.0-beta.12) (2026-06-05)
 
 
