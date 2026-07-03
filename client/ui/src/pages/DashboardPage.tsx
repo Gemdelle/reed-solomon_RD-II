@@ -13,8 +13,9 @@ import ErrorPage from "./ErrorPage";
 import ArchiveTab from "../components/tabs/ArchiveTab";
 import ConfigTab from "../components/tabs/ConfigTab";
 import DemoTab from "../components/tabs/DemoTab";
+import TutorialTab from "../components/tabs/TutorialTab";
 
-type Tab = "peers" | "archive" | "demo" | "admin" | "config";
+type Tab = "tutorial" | "peers" | "archive" | "demo" | "admin" | "config";
 
 interface Props {
   config: AppConfig;
@@ -141,6 +142,19 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
         {/* Expandable icon sidebar — expands on hover via CSS group */}
         <nav className="group w-14 hover:w-48 bg-slate-900 border-r border-slate-800 flex flex-col py-3 px-1.5 gap-1 flex-shrink-0 transition-[width] duration-200 overflow-hidden">
 
+          {/* Tutorial */}
+          <NavItem
+            active={activeTab === "tutorial"}
+            onClick={() => setActiveTab("tutorial")}
+            label="Tutorial"
+            icon={
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+              </svg>
+            }
+          />
+
           {/* Peers */}
           <NavItem
             active={activeTab === "peers"}
@@ -213,7 +227,13 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
         </nav>
 
         {/* Main content area */}
-        <main className="flex-1 min-w-0 overflow-auto">
+        <main className={`flex-1 min-w-0 ${activeTab === "tutorial" ? "overflow-hidden" : "overflow-auto"}`}>
+          {activeTab === "tutorial" && (
+            <div className="flex h-full min-h-0 flex-col overflow-hidden">
+              <TutorialTab />
+            </div>
+          )}
+
           {activeTab === "peers" && (
             <div className="flex gap-4 p-4 h-full">
               <div className="w-80 flex-shrink-0">

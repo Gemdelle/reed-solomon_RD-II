@@ -203,6 +203,37 @@
 .stagger-2 { animation-delay: 0.16s; }
 .stagger-3 { animation-delay: 0.24s; }
 
+/* Tutorial — bird flies into the newly revealed step title */
+@keyframes tutorial-bird-in {
+  0% { opacity: 0; transform: translate(-22px, -26px) scale(0.55) rotate(-16deg); }
+  55% { opacity: 1; transform: translate(5px, 4px) scale(1.15) rotate(7deg); }
+  100% { opacity: 1; transform: translate(0, 0) scale(1) rotate(0deg); }
+}
+.animate-tutorial-bird-in {
+  animation: tutorial-bird-in 0.6s cubic-bezier(0.34, 1.45, 0.64, 1);
+}
+
+/* Tutorial — circulitos/píxeles que aparecen con un pop */
+@keyframes pixel-pop {
+  0% { opacity: 0; transform: scale(0); }
+  70% { transform: scale(1.25); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-pixel-pop {
+  animation: pixel-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Tutorial — puntos que viajan de un peer a otro */
+@keyframes dot-travel {
+  0% { left: 0%; opacity: 0; }
+  12% { opacity: 1; }
+  88% { opacity: 1; }
+  100% { left: 100%; opacity: 0; }
+}
+.dot-travel {
+  animation: dot-travel 1.8s linear infinite;
+}
+
 /* Intro splash — ~4.5s total */
 @keyframes intro-bird-fly {
   0% {
