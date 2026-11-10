@@ -23,6 +23,7 @@ echo "==> [1/5] rsync repo (excluding local-only stuff) to ${HOST}:${REMOTE_DIR}
 rsync -az --delete \
   --exclude '.git/' \
   --exclude '.env' \
+  --exclude 'agent-*/' \
   --exclude 'client/agent/run/' \
   --exclude 'client/agent/.venv/' \
   --exclude 'client/node_modules/' \

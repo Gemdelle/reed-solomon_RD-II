@@ -74,6 +74,19 @@ async def _relay_candidates(target: str) -> list[str]:
     ]
 
 
+async def _report_link(src: str, dst: str, api_url: str, loss_rate: float) -> None:
+    from metrics.probe import _probe_rtt
+
+    try:
+        rtt_ms, jitter_ms = await _probe_rtt(api_url)
+        if rtt_ms > 0 or loss_rate >= 1.0:
+            await server_client.report_metrics(
+                src, target_peer_id=dst, rtt_ms=rtt_ms, jitter_ms=jitter_ms, loss_rate=loss_rate,
+            )
+    except Exception:
+        pass
+
+
 @router.post("/send", response_model=TransferResult)
 async def send_file(req: SendRequest) -> TransferResult:
     get_meter().create_counter("rs_transfers_total").add(1, {"direction": "sent"})
@@ -239,6 +252,10 @@ async def send_file(req: SendRequest) -> TransferResult:
             loss_rate=loss_rate,
         )
     )
+    # per-link report (src→first hop) feeds the server's Neo4j CONNECTS_TO edge
+    first_hop = (relay_info or {}).get("peer_id") or req.target_peer_id
+    link_loss = 1.0 if result.status == TransferStatus.failed else loss_rate
+    asyncio.create_task(_report_link(effective_pid, first_hop, target_api_url, link_loss))
     asyncio.create_task(
         insert_transfer(
             transfer_id=transfer_id,

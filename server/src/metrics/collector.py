@@ -6,6 +6,7 @@ from neo4j_client import get_neo4j
 from .models import MetricReport
 
 _MAX_REPORTS = 10
+_MAX_LINK_REPORTS = 30
 
 
 async def store_report(report: MetricReport) -> None:
@@ -33,6 +34,10 @@ async def store_report(report: MetricReport) -> None:
     # Special case: 'server' node might not exist as a :Peer node, or we can create it.
     # For now, let's assume we only track Peer-to-Peer edges in the graph for routing.
     if report.target_peer_id != "server":
+        r = get_redis()
+        lkey = f"linkhist:{report.peer_id}:{report.target_peer_id}"
+        await r.lpush(lkey, report.model_dump_json())
+        await r.ltrim(lkey, 0, _MAX_LINK_REPORTS - 1)
         async with driver.session() as session:
             await session.run(
                 query,
@@ -58,3 +63,11 @@ async def get_average(peer_id: str) -> dict | None:
         "loss_rate": sum(item.loss_rate for item in items) / n,
         "samples": n,
     }
+
+
+async def get_link_history(a: str, b: str) -> list[dict]:
+    """P2P reports for a↔b (both directions), oldest first."""
+    r = get_redis()
+    items = [*await r.lrange(f"linkhist:{a}:{b}", 0, -1), *await r.lrange(f"linkhist:{b}:{a}", 0, -1)]
+    reports = [MetricReport.model_validate_json(raw).model_dump() for raw in items]
+    return sorted(reports, key=lambda x: x.get("recorded_at") or "")

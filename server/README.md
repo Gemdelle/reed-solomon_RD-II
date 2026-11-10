@@ -52,6 +52,8 @@ GET  /jev/status                         Jev availability + config
 GET  /jev/transit/{source}/{target}     redundancy degree + relay decision
 POST /jev/mock/seed[/{scenario}]         seed mock metrics between two hosts
 
+./scripts/jev.sh [--help]  (repo root)       CLI: ask Jev (default: relay team-a → team-c?)
+
 POST /invites/                           create a single-use invite token
 ```
 
@@ -79,6 +81,7 @@ src/
 │   └── router.py        /report and /recommendation/{peer_id} endpoints
 │
 ├── jev/
+│   ├── cli.py           CLI (scripts/jev.sh): ask Jev ad-hoc noul/score questions on mock links
 │   ├── client.py        async httpx client for OpenRouter Decisions API
 │   ├── decider.py       build state+questions, call Jev, confidence gate + fallback
 │   ├── mock.py          seed telemetry between two hosts + relays (dev)

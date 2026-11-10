@@ -97,7 +97,7 @@ El seed crea dos pares (hosts) + un relay candidato e inyecta `MetricReport`s
 en Redis, de modo que el pipeline completo funcione sin agentes reales.
 
 ```bash
-cd server
+
 uv sync
 uv run uvicorn main:app --reload --app-dir src
 ```
@@ -135,6 +135,31 @@ Respuesta del transit (ejemplo, degradation satellite):
 `GET /jev/transit/...?preview=true` fuerza la llamada a Jev aunque
 `JEV_ENABLED=false` (útil en desarrollo para ver el comportamiento Jev sin
 activarlo todavía). Si no hay key configurada, degrada a la tabla determinista.
+(Antes `preview` no tenía efecto porque el cliente también exigía `JEV_ENABLED`; ya está corregido.)
+
+## CLI: consultar a Jev con parámetros
+
+`scripts/jev.sh` (wrapper de `python -m jev.cli`, se puede correr desde cualquier directorio) manda una pregunta *noul* a Jev
+sobre métricas mock entre dos hosts y un relay, sin Redis ni Neo4j. Solo
+necesita `OPENROUTER_API_KEY` (env o `server/.env`). Ignora `JEV_ENABLED`.
+
+La configuración vive arriba de todo en `scripts/jev.sh` (bloque `CONFIG`):
+hosts A (origen), B (relay), C (destino), métricas de cada enlace (RTT,
+jitter, pérdida, alcanzable), pregunta, criterios true/false, umbral y si se
+pide también la redundancia. El script calcula las dos rutas que se comparan
+(directa A→C vs A→B→C: RTT/jitter sumados, pérdida `1-(1-l1)(1-l2)`) y las
+manda en el `state`.
+
+```bash
+./scripts/jev.sh                      # usa el bloque CONFIG
+./scripts/jev.sh --threshold 0.7      # args extra pisan la config
+./scripts/jev.sh -s nat-blocked       # escenario mock del CLI en vez del CONFIG
+./scripts/jev.sh --dry-run            # muestra el payload, no llama a la API (sin costo)
+./scripts/jev.sh --json               # respuesta cruda
+```
+
+Salida: `True`/`False` con el criterio elegido, `P(true)`, confianza
+(`max(p, 1-p)`) y si supera el umbral (`--threshold` o `JEV_CONFIDENCE_THRESHOLD`).
 
 ## Diseño de decisiones: descomposición y umbrales
 

@@ -222,12 +222,12 @@ async def decide_transit(
     settings = get_settings()
     client = JevClient()
 
-    if (settings.JEV_ENABLED or force_jev) and client.enabled:
+    if (settings.JEV_ENABLED or force_jev) and client.configured:
         try:
             dec = await _decide_with_jev(
                 client, source_id, target_id, relay_candidates or [],
                 rtt_ms=eff_rtt, jitter_ms=eff_jit, loss_rate=eff_loss,
-                hint=eff_hint, samples=samples,
+                hint=eff_hint, samples=samples, force=force_jev,
             )
             return dec
         except JevError as exc:  # network / auth / missing key
@@ -256,6 +256,7 @@ async def _decide_with_jev(
     loss_rate: float,
     hint: str,
     samples: int,
+    force: bool = False,
 ) -> TransitDecision:
     from metrics.recommender import PROFILES
 
@@ -326,7 +327,7 @@ async def _decide_with_jev(
             "criteria": options,
         }
 
-    answers = await client.decide(state, questions)
+    answers = await client.decide(state, questions, force=force)
 
     # ── Parse redundancy (Score) ──────────────────────────────────────────────
     threshold = get_settings().JEV_CONFIDENCE_THRESHOLD

@@ -46,10 +46,14 @@ class JevClient:
         settings = get_settings()
         return bool(settings.JEV_ENABLED and settings.OPENROUTER_API_KEY)
 
-    async def decide(self, state: dict, questions: dict) -> dict:
+    @property
+    def configured(self) -> bool:
+        return bool(self._api_key)
+
+    async def decide(self, state: dict, questions: dict, *, force: bool = False) -> dict:
         """POST a `state` + `questions` payload and return Jev's `answers`."""
         settings = get_settings()
-        if not settings.JEV_ENABLED:
+        if not (settings.JEV_ENABLED or force):
             raise JevError("JEV_ENABLED=false")
         if not self._api_key:
             raise JevError("OPENROUTER_API_KEY not set")
