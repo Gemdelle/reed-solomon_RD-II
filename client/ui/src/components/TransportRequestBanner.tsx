@@ -98,14 +98,14 @@ export default function TransportRequestBanner() {
 
             {/* Actions */}
             <div className="flex gap-2 px-4 pb-3">
-              <button
+              <button data-testid="transport-request-accept"
                 onClick={() => handleAccept(req.request_id)}
                 disabled={busy[req.request_id]}
                 className="flex-1 text-xs bg-violet-900/60 hover:bg-violet-800/60 text-violet-200 border border-violet-700/60 rounded-lg py-2 font-medium transition-colors disabled:opacity-40"
               >
                 {busy[req.request_id] ? "…" : "Aceptar"}
               </button>
-              <button
+              <button data-testid="transport-request-reject"
                 onClick={() => handleReject(req.request_id)}
                 disabled={busy[req.request_id]}
                 className="flex-1 text-xs bg-slate-800/60 hover:bg-slate-700/60 text-slate-400 border border-slate-700/60 rounded-lg py-2 transition-colors disabled:opacity-40"

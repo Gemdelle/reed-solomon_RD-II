@@ -144,6 +144,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <label className={labelClass} htmlFor="cfg-peer-id">Peer ID</label>
             <input
               id="cfg-peer-id"
+              data-testid="cfg-peer-id"
               type="text"
               className={inputClass}
               value={form.peer_id ?? ""}
@@ -156,6 +157,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <label className={labelClass} htmlFor="cfg-agent-api-url">Agent API URL</label>
             <input
               id="cfg-agent-api-url"
+              data-testid="cfg-agent-api-url"
               type="text"
               className={inputClass}
               value={form.agent_api_url ?? ""}
@@ -236,6 +238,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <label className={labelClass} htmlFor="cfg-server-url">Server URL</label>
             <input
               id="cfg-server-url"
+              data-testid="cfg-server-url"
               type="text"
               className={inputClass}
               value={form.server_url ?? ""}
@@ -254,6 +257,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
                 <span className="text-xs text-red-400 font-mono">{pingError}</span>
               ) : null}
               <button
+                data-testid="cfg-ping"
                 onClick={handlePing}
                 disabled={pinging}
                 className="text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-300 rounded-lg px-3 py-1.5 transition-colors"
@@ -321,6 +325,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <label className={labelClass} htmlFor="cfg-udp-host">UDP Bind Host</label>
             <input
               id="cfg-udp-host"
+              data-testid="cfg-udp-host"
               type="text"
               className={inputClass}
               value={form.udp_host ?? ""}
@@ -334,6 +339,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <label className={labelClass} htmlFor="cfg-udp-port">UDP Port</label>
             <input
               id="cfg-udp-port"
+              data-testid="cfg-udp-port"
               type="number"
               className={inputClass}
               value={form.udp_port ?? ""}
@@ -346,6 +352,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <label className={labelClass} htmlFor="cfg-udp-advertise-host">Advertise Host</label>
             <input
               id="cfg-udp-advertise-host"
+              data-testid="cfg-udp-advertise-host"
               type="text"
               className={inputClass}
               value={form.udp_advertise_host ?? ""}
@@ -368,6 +375,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <label className={labelClass} htmlFor="cfg-storage-path">Directorio de archivos</label>
             <input
               id="cfg-storage-path"
+              data-testid="cfg-storage-path"
               type="text"
               className={inputClass}
               value={form.storage_path ?? ""}
@@ -403,6 +411,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <div className="relative">
               <input
                 id="cfg-invite-token"
+                data-testid="cfg-invite-token"
                 type={showToken ? "text" : "password"}
                 className={`${inputClass} pr-10`}
                 value={form.invite_token ?? ""}
@@ -436,6 +445,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
             <label className={labelClass} htmlFor="cfg-network-hint">Network Hint</label>
             <input
               id="cfg-network-hint"
+              data-testid="cfg-network-hint"
               type="text"
               className={inputClass}
               value={form.network_hint ?? ""}
@@ -467,6 +477,7 @@ export default function ConfigTab({ agentUrl, serverUrl: _serverUrl }: Props) {
 
       {/* Save button */}
       <button
+        data-testid="cfg-save"
         type="button"
         onClick={handleSave}
         disabled={saving || !config}

@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     # Defaults to preferred_username from JWT, or PEER_ID if not set
     PEER_OWNER: str = ""
 
+    # Max accepted upload size in bytes; 0 = unlimited.
+    MAX_UPLOAD_BYTES: int = 0
+    # When set, local-control routes (/files, /config, /auth/token, /transfer/send) require this bearer token.
+    AGENT_API_TOKEN: str = ""
+
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "json"  # json | text
+
     model_config = {"env_file": ".env"}
 
     @model_validator(mode="after")

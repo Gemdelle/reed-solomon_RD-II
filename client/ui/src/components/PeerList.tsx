@@ -113,7 +113,7 @@ function PeerRow({
       </div>
 
       {status === "online" && !isSelf ? (
-        <button
+        <button data-testid={`peer-send-${peer.peer_id}`}
           onClick={() => onSend(peer)}
           className={`flex-shrink-0 text-xs border rounded-lg px-3 py-1.5 transition-colors ${
             isOwnDevice

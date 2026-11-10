@@ -82,7 +82,7 @@ export default function IncomingConnectionsBanner() {
             />
 
             {/* Expandable: full fingerprint */}
-            <button
+            <button data-testid="incoming-toggle-fingerprint"
               onClick={() => setExpanded((e) => ({ ...e, [conn.transfer_id]: !e[conn.transfer_id] }))}
               className="text-xs text-slate-600 hover:text-slate-400 transition-colors"
             >
@@ -97,14 +97,14 @@ export default function IncomingConnectionsBanner() {
 
           {/* Actions */}
           <div className="flex gap-2 px-4 pb-3">
-            <button
+            <button data-testid="incoming-accept"
               onClick={() => handleAccept(conn.transfer_id)}
               disabled={busy[conn.transfer_id]}
               className="flex-1 text-xs bg-violet-900/60 hover:bg-violet-800/60 text-violet-200 border border-violet-700/60 rounded-lg py-2 font-medium transition-colors disabled:opacity-40"
             >
               {busy[conn.transfer_id] ? "…" : "Aceptar"}
             </button>
-            <button
+            <button data-testid="incoming-reject"
               onClick={() => handleReject(conn.transfer_id)}
               disabled={busy[conn.transfer_id]}
               className="flex-1 text-xs bg-slate-800/60 hover:bg-slate-700/60 text-slate-400 border border-slate-700/60 rounded-lg py-2 transition-colors disabled:opacity-40"

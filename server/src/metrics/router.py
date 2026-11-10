@@ -1,4 +1,9 @@
+import csv
+import io
+import json
+
 from fastapi import APIRouter, Depends
+from fastapi.responses import Response
 
 from auth.deps import CallerInfo, extract_auth
 from neo4j_client import get_neo4j
@@ -62,6 +67,28 @@ async def get_metric_history(peer_id: str) -> dict:
     # LPUSH stores newest at index 0 → reverse to get chronological order
     samples = [MetricReport.model_validate_json(raw).model_dump() for raw in reversed(items_raw)]
     return {"peer_id": peer_id, "samples": samples}
+
+
+@router.get("/export")
+async def export_metrics(
+    peer_id: str | None = None,
+    format: str = "json",
+    caller: CallerInfo = Depends(extract_auth),
+) -> Response:
+    """Dump raw metric samples (all peers, or one) as JSON or CSV."""
+    r = get_redis()
+    keys = [f"metrics:{peer_id}"] if peer_id else sorted([k async for k in r.scan_iter("metrics:*")])
+    rows: list[dict] = []
+    for key in keys:
+        for raw in reversed(await r.lrange(key, 0, -1)):
+            rows.append(MetricReport.model_validate_json(raw).model_dump())
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=list(MetricReport.model_fields))
+        writer.writeheader()
+        writer.writerows(rows)
+        return Response(buf.getvalue(), media_type="text/csv")
+    return Response(json.dumps({"samples": rows}), media_type="application/json")
 
 
 @router.get("/network-graph")

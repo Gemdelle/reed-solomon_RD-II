@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from contextlib import asynccontextmanager
 
 import httpx
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 import config_store
 from config import get_settings
 from config_router import router as config_router
+from logging_setup import access_log_middleware, setup_logging
 from files.router import router as files_router
 from metrics.probe import rtt_probe_loop
 from peers.router import router as peers_router
@@ -123,6 +126,22 @@ def _effective_advertise_host() -> str:
     return udp_host
 
 
+async def _parent_watchdog() -> None:
+    """Exit when the Electron parent (AGENT_PARENT_PID) disappears, so no orphan agents are left."""
+    pid = int(os.environ.get("AGENT_PARENT_PID", "0") or 0)
+    if not pid:
+        return
+    while True:
+        await asyncio.sleep(2)
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            logging.getLogger("agent").warning("parent_gone", extra={"parent_pid": pid})
+            os._exit(0)
+        except OSError:
+            pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -170,23 +189,44 @@ async def lifespan(app: FastAPI):
             token_store.set_peer_id(registered_pid)
             await _apply_server_incoming_policy(registered_pid)
         except Exception:
-            pass
+            logging.getLogger("agent").warning("register_failed", exc_info=True)
 
     heartbeat_task = asyncio.create_task(_heartbeat_loop())
     probe_task = asyncio.create_task(rtt_probe_loop())
+    parent_task = asyncio.create_task(_parent_watchdog())
     yield
     heartbeat_task.cancel()
     probe_task.cancel()
+    parent_task.cancel()
     get_transport().stop()
     await db.close_db()
 
 
+setup_logging(get_settings().LOG_LEVEL, get_settings().LOG_FORMAT)
+
 app = FastAPI(title="RS Transfer Agent", version="0.1.0", lifespan=lifespan)
+app.middleware("http")(access_log_middleware)
 
 # Setup OpenTelemetry
 settings = get_settings()
 setup_otel(app, service_name=f"rs-agent-{settings.PEER_ID}")
 init_custom_metrics()
+
+_PROTECTED_PREFIXES = ("/files", "/config", "/auth/token", "/transfer/send")
+
+
+@app.middleware("http")
+async def require_api_token(request, call_next):
+    token = get_settings().AGENT_API_TOKEN
+    if token and request.method != "OPTIONS" and request.url.path.startswith(_PROTECTED_PREFIXES):
+        if request.headers.get("authorization") != f"Bearer {token}":
+            logging.getLogger("auth").warning(
+                "agent_api_denied",
+                extra={"path": request.url.path, "client_ip": request.client.host if request.client else None},
+            )
+            return JSONResponse({"detail": "Invalid or missing agent API token"}, status_code=401)
+    return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -281,6 +321,7 @@ async def push_token(body: TokenPayload):
         registered_pid = result.get("peer_id", peer_id)
         token_store.set_peer_id(registered_pid)
         await _apply_server_incoming_policy(registered_pid)
+        logging.getLogger("agent").info("token_registered", extra={"peer_id": registered_pid, "user": owner})
     except Exception:
-        pass
+        logging.getLogger("agent").warning("register_failed", extra={"peer_id": peer_id}, exc_info=True)
     return {"ok": True}

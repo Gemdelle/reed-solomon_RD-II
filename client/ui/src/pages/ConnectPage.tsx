@@ -150,7 +150,7 @@ export default function ConnectPage() {
 
                 {/* Combobox: input + history dropdown */}
                 <div ref={comboRef} className="relative mb-5">
-                  <input
+                  <input data-testid="server-url-input"
                     type="url"
                     value={serverUrl}
                     onChange={(e) => setServerUrl(e.target.value)}
@@ -161,7 +161,7 @@ export default function ConnectPage() {
 
                   {/* History toggle button */}
                   {history.length > 0 ? (
-                    <button
+                    <button data-testid="server-history-toggle"
                       type="button"
                       onClick={() => setHistoryOpen((v) => !v)}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
@@ -195,7 +195,7 @@ export default function ConnectPage() {
                           </svg>
                           <span className="flex-1 text-xs font-mono text-slate-300 truncate">{h}</span>
                           {/* Trash icon */}
-                          <button
+                          <button data-testid="server-history-remove"
                             type="button"
                             onClick={(e) => handleRemoveHistory(h, e)}
                             className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-600 hover:text-red-400 p-0.5 rounded"
@@ -219,7 +219,7 @@ export default function ConnectPage() {
                     {error}
                   </p>
                 )}
-                <button
+                <button data-testid="server-connect"
                   onClick={handleServerConnect}
                   disabled={loading || !serverUrl.trim()}
                   className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg py-2.5 text-sm font-medium transition-colors"
@@ -236,7 +236,7 @@ export default function ConnectPage() {
                 <div className="flex items-center gap-2 mb-8">
                   <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
                   <span className="text-sm text-slate-300 truncate">{serverUrl.replace(/\/$/, "")}</span>
-                  <button
+                  <button data-testid="server-change"
                     onClick={() => { setPhase("server"); setError(null); }}
                     className="ml-auto text-xs text-slate-500 hover:text-slate-300 flex-shrink-0"
                   >
@@ -256,7 +256,7 @@ export default function ConnectPage() {
                 )}
 
                 {/* SSO button */}
-                <button
+                <button data-testid="sso-login"
                   onClick={handleSsoLogin}
                   disabled={!ssoReady}
                   className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-100 disabled:bg-slate-800 disabled:border disabled:border-slate-700 disabled:cursor-not-allowed text-slate-900 disabled:text-slate-500 rounded-lg py-3 text-sm font-semibold transition-colors mb-4"

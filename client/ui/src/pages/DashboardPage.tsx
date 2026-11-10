@@ -26,9 +26,10 @@ interface NavItemProps {
   label: string;
   icon: React.ReactNode;
   accent?: string;
+  testId?: string;
 }
 
-function NavItem({ active, onClick, label, icon, accent }: NavItemProps) {
+function NavItem({ active, onClick, label, icon, accent, testId }: NavItemProps) {
   const activeClass = active
     ? accent === "amber"
       ? "bg-amber-950/60 text-amber-400"
@@ -37,6 +38,7 @@ function NavItem({ active, onClick, label, icon, accent }: NavItemProps) {
 
   return (
     <button
+      data-testid={testId}
       onClick={onClick}
       title={label}
       className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition-colors ${activeClass}`}
@@ -142,6 +144,7 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
 
           {/* Peers */}
           <NavItem
+            testId="nav-peers"
             active={activeTab === "peers"}
             onClick={() => setActiveTab("peers")}
             label="Peers"
@@ -157,6 +160,7 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
 
           {/* Archivo */}
           <NavItem
+            testId="nav-archive"
             active={activeTab === "archive"}
             onClick={() => setActiveTab("archive")}
             label="Archivo"
@@ -170,7 +174,8 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
           {/* Admin — only visible when admin */}
           {isAdmin ? (
             <NavItem
-              active={activeTab === "admin"}
+              testId="nav-admin"
+            active={activeTab === "admin"}
               onClick={() => setActiveTab("admin")}
               label="Admin"
               accent="amber"
@@ -185,6 +190,7 @@ export default function DashboardPage({ config, onDisconnect }: Props) {
 
           {/* Configuración */}
           <NavItem
+            testId="nav-config"
             active={activeTab === "config"}
             onClick={() => setActiveTab("config")}
             label="Configuración"

@@ -70,7 +70,7 @@ export default function FileList({ peers, onSend }: Props) {
     <div className="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden h-full flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
         <h2 className="text-sm font-medium text-slate-200">Mis archivos</h2>
-        <button
+        <button data-testid="file-upload-button"
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
           className="flex items-center gap-1.5 text-xs bg-brand-600 hover:bg-brand-700 disabled:opacity-40 text-white rounded-lg px-3 py-1.5 transition-colors"
@@ -78,7 +78,7 @@ export default function FileList({ peers, onSend }: Props) {
           <span>+</span>
           {uploading ? "Subiendo…" : "Subir"}
         </button>
-        <input
+        <input data-testid="file-upload-input"
           ref={inputRef}
           type="file"
           className="hidden"
@@ -118,14 +118,14 @@ export default function FileList({ peers, onSend }: Props) {
                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   {onlinepeers.length > 0 ? (
                     onlinepeers.length === 1 ? (
-                      <button
+                      <button data-testid={`file-send-quick-${file.file_id}`}
                         onClick={() => onSend(file, onlinepeers[0])}
                         className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 rounded-lg px-2.5 py-1 transition-colors"
                       >
                         Enviar
                       </button>
                     ) : (
-                      <button
+                      <button data-testid={`file-send-${file.file_id}`}
                         onClick={() => onSend(file)}
                         className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 rounded-lg px-2.5 py-1 transition-colors"
                       >
@@ -141,7 +141,7 @@ export default function FileList({ peers, onSend }: Props) {
                   >
                     ↓
                   </a>
-                  <button
+                  <button data-testid={`file-delete-${file.file_id}`}
                     onClick={() => deleteFile(file.file_id)}
                     className="text-xs text-slate-600 hover:text-red-400 transition-colors px-1"
                     title="Eliminar"

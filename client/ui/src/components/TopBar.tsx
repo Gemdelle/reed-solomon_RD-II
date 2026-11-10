@@ -66,7 +66,7 @@ export default function TopBar({ serverOnline, peerId, onDisconnect }: Props) {
 
       {/* Right side: user avatar with popup */}
       <div ref={containerRef} className="ml-auto relative">
-        <button
+        <button data-testid="user-menu-toggle"
           onClick={() => setOpen((v) => !v)}
           className="w-8 h-8 rounded-full bg-brand-700 hover:bg-brand-600 text-white text-xs font-semibold flex items-center justify-center transition-colors ring-2 ring-brand-900 hover:ring-brand-700"
           title={preferredUsername}
@@ -109,7 +109,7 @@ export default function TopBar({ serverOnline, peerId, onDisconnect }: Props) {
             ) : null}
 
             {/* Logout */}
-            <button
+            <button data-testid="disconnect"
               onClick={() => { setOpen(false); onDisconnect(); }}
               className="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs text-slate-400 hover:text-red-400 hover:bg-slate-800 transition-colors text-left"
             >

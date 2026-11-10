@@ -85,13 +85,13 @@ export default function ErrorPage({ onRetry, onDisconnect }: Props) {
         </p>
 
         <div className="flex flex-col gap-3">
-          <button
+          <button data-testid="error-retry"
             onClick={handleRetry}
             className="w-full bg-brand-600 hover:bg-brand-700 text-white rounded-lg py-2.5 text-sm font-medium transition-colors"
           >
             Reintentar ahora
           </button>
-          <button
+          <button data-testid="error-back-to-servers"
             onClick={onDisconnect}
             className="w-full text-slate-500 hover:text-slate-300 text-sm transition-colors py-1"
           >

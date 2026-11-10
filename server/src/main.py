@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
+from logging_setup import access_log_middleware, setup_logging
 from device_tokens.router import router as device_tokens_router
 from invites.router import router as invites_router
 from jev.router import router as jev_router
@@ -18,7 +19,11 @@ async def lifespan(app: FastAPI):
     await close_neo4j()
 
 
+_settings = get_settings()
+setup_logging(_settings.LOG_LEVEL, _settings.LOG_FORMAT)
+
 app = FastAPI(title="RS Transfer Server", version="0.1.0", lifespan=lifespan)
+app.middleware("http")(access_log_middleware)
 
 app.add_middleware(
     CORSMiddleware,

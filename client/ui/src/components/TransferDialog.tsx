@@ -158,7 +158,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
               {result.reason && (
                 <p className="text-xs text-slate-500 mt-1">{result.reason}</p>
               )}
-              <button
+              <button data-testid="transfer-close-result"
                 onClick={() => onComplete(result)}
                 className="bird-btn mt-5 bg-brand-600 hover:bg-brand-700 text-white rounded-lg px-6 py-2 text-sm transition-colors"
               >
@@ -173,7 +173,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                 {files.length === 0 ? (
                   <p className="text-xs text-slate-500">No hay archivos locales. Subí uno primero.</p>
                 ) : (
-                  <select
+                  <select data-testid="transfer-file-select"
                     value={selectedFile?.file_id ?? ""}
                     onChange={(e) => setSelectedFile(files.find((f) => f.file_id === e.target.value) ?? null)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -197,7 +197,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                     const isRegistered = peerTransport === t;
                     const isSelected = transport === t;
                     return (
-                      <button
+                      <button data-testid={`transfer-transport-${t}`}
                         key={t}
                         type="button"
                         onClick={() => {
@@ -246,7 +246,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                       <p className="text-red-400">{transportRequestError}</p>
                     ) : null}
                     {!transportRequestSent ? (
-                      <button
+                      <button data-testid="transfer-request-transport"
                         type="button"
                         onClick={handleRequestTransport}
                         disabled={requestingTransport}
@@ -303,7 +303,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                       {adaptive ? "usa la recomendación del servidor" : "manual"}
                     </span>
                   </div>
-                  <button
+                  <button data-testid="transfer-adaptive-toggle"
                     onClick={() => setAdaptive((v) => !v)}
                     className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
                       adaptive ? "bg-brand-600" : "bg-slate-700"
@@ -326,7 +326,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                     </div>
                     {userOverride && recommendation && (
                       <div className="flex justify-end mb-2">
-                        <button
+                        <button data-testid="transfer-reset-recommendation"
                           onClick={handleResetRecommendation}
                           className="text-xs text-slate-500 underline hover:text-slate-300"
                         >
@@ -334,7 +334,7 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
                         </button>
                       </div>
                     )}
-                    <input
+                    <input data-testid="transfer-redundancy-slider"
                       type="range"
                       min={5} max={50} step={1}
                       value={Math.round(redundancy * 100)}
@@ -359,14 +359,14 @@ export default function TransferDialog({ peer, preselectedFile, serverUrl, peerI
 
               {/* Actions */}
               <div className="flex gap-3 pt-1">
-                <button
+                <button data-testid="transfer-cancel"
                   onClick={onClose}
                   disabled={sending}
                   className="flex-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 rounded-lg py-2.5 text-sm transition-colors"
                 >
                   Cancelar
                 </button>
-                <button
+                <button data-testid="transfer-send"
                   onClick={handleSend}
                   disabled={sending || !selectedFile}
                   className="bird-btn flex-1 bg-brand-600 hover:bg-brand-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg py-2.5 text-sm font-medium transition-colors"

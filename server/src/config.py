@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # deterministic quality table is used as a safe fallback.
     JEV_CONFIDENCE_THRESHOLD: float = 0.85
 
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "json"  # json | text
+
     model_config = {"env_file": ".env"}
 
 

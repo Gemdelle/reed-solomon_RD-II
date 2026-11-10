@@ -4,6 +4,7 @@ import * as path from "path";
 import * as http from "http";
 
 const AGENT_PORT = 8000;
+const HEADLESS_TEST = process.argv.includes("--headless-test") || process.env.ROCKDOVE_HEADLESS_TEST === "1";
 let agentProcess: ChildProcess | null = null;
 let mainWindow: BrowserWindow | null = null;
 
@@ -46,15 +47,27 @@ function resolveAgent(): { cmd: string; args: string[]; cwd: string } {
 
 function startAgent(): void {
   const { cmd, args, cwd } = resolveAgent();
-  agentProcess = spawn(cmd, args, { cwd, env: { ...process.env }, stdio: "pipe" });
+  agentProcess = spawn(cmd, args, {
+    cwd,
+    env: { ...process.env, AGENT_PARENT_PID: String(process.pid) },
+    stdio: "pipe",
+    detached: process.platform !== "win32", // own process group, so the whole tree can be killed
+  });
   agentProcess.stdout?.on("data", (d) => process.stdout.write(`[agent] ${d}`));
   agentProcess.stderr?.on("data", (d) => process.stderr.write(`[agent] ${d}`));
   agentProcess.on("error", (e) => console.error("[agent] spawn error:", e.message));
 }
 
 function stopAgent(): void {
-  agentProcess?.kill();
+  const pid = agentProcess?.pid;
   agentProcess = null;
+  if (!pid) return;
+  try {
+    if (process.platform === "win32") spawn("taskkill", ["/pid", String(pid), "/T", "/F"]);
+    else process.kill(-pid, "SIGTERM");
+  } catch {
+    // already gone
+  }
 }
 
 function waitForAgent(maxAttempts = 40): Promise<void> {
@@ -91,7 +104,7 @@ function createWindow(): void {
     },
   });
 
-  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.once("ready-to-show", () => { if (!HEADLESS_TEST) mainWindow?.show(); });
 
   if (app.isPackaged) {
     mainWindow.loadFile(path.join(process.resourcesPath, "ui", "dist", "index.html"));
@@ -132,6 +145,11 @@ if (!gotTheLock) {
     mainWindow?.on("maximize", () => mainWindow?.webContents.send("win-maximized", true));
     mainWindow?.on("unmaximize", () => mainWindow?.webContents.send("win-maximized", false));
   });
+}
+
+app.on("before-quit", stopAgent);
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => { stopAgent(); app.quit(); });
 }
 
 app.on("window-all-closed", () => {

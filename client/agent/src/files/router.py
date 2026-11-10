@@ -13,7 +13,10 @@ def _storage() -> FileStorage:
 
 @router.post("/", response_model=FileMetadata)
 async def upload_file(file: UploadFile = File(...)) -> FileMetadata:
-    data = await file.read()
+    limit = get_settings().MAX_UPLOAD_BYTES
+    data = await file.read(limit + 1 if limit else -1)
+    if limit and len(data) > limit:
+        raise HTTPException(413, f"File exceeds MAX_UPLOAD_BYTES ({limit})")
     return FileMetadata(**_storage().save(data, file.filename or ""))
 
 
